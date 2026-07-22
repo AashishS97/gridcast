@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Environments & secrets
+.env
+
+# Data — raw data is re-pullable from ENTSO-E, never committed
+data/raw/
+data/processed/
+*.parquet
+*.csv
+
+# Models — artifacts are build outputs, not source
+models/artifacts/
+*.pkl
+*.joblib
+*.txt.model
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

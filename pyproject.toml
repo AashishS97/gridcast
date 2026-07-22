@@ -1,0 +1,38 @@
+[project]
+name = "gridcast"
+version = "0.1.0"
+description = "Probabilistic forecasting of Dutch electricity load with prediction intervals, backtesting, and drift monitoring"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "pandas>=2.2",
+    "polars>=1.0",
+    "scikit-learn>=1.5",
+    "lightgbm>=4.3",
+    "statsmodels>=0.14",
+    "requests>=2.32",
+    "python-dotenv>=1.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.5",
+    "pytest>=8.2",
+    "pre-commit>=3.7",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort (import sorting)
+    "UP",  # pyupgrade (modern syntax)
+    "B",   # bugbear (likely bugs)
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
