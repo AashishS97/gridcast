@@ -12,6 +12,8 @@ dependencies = [
     "statsmodels>=0.14",
     "requests>=2.32",
     "python-dotenv>=1.0",
+    "pyarrow>=25.0.0",
+    "holidays>=0.101",
 ]
 
 [dependency-groups]
