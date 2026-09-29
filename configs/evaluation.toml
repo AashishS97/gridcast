@@ -1,0 +1,26 @@
+﻿# Pinned evaluation windows: the contract every phase is scored on.
+# Phase 2 derived windows from "end of data", so they moved on every
+# refetch. Recovered 2026-09-29 from data/backtests/*.parquet and pinned.
+# All times UTC. Origins are midnight UTC; each forecasts [origin, origin+24h).
+
+[backtest]
+# Phase 2 dev folds (expanding window). Recovered from baselines.parquet:
+# 140 scored folds, ids 0-139.
+first_origin = "2024-06-29T00:00:00Z"
+last_origin = "2026-05-25T00:00:00Z"
+step = "5D"                              # coprime with 7: every weekday scored
+horizon_hours = 24
+train_start = "2023-07-01T00:00:00Z"     # expanding window from data start
+expected_folds = 140
+
+[holdout.phase2]
+first_origin = "2026-06-03T00:00:00Z"
+last_origin = "2026-07-27T00:00:00Z"
+status = "spent"
+note = "Scored once in Phase 2 (297 MW MAE on its clean 27-origin window). July later found corrupt upstream. Never re-score."
+
+[holdout.phase3]
+first_origin = "2026-08-16T00:00:00Z"
+last_origin = "2026-08-30T00:00:00Z"
+status = "sealed"
+note = "15 clean origins between the July and September exclusions (336h lookback). Scored exactly once, at the end of Phase 3. Confirmation, not headline."

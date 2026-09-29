@@ -23,12 +23,12 @@ def test_test_window_is_24_rows(index):
         assert fold.test_mask(index).sum() == 24
 
 
-def test_origins_at_midnight_weekly(index):
+def test_origins_at_midnight_default_step(index):
     folds = rolling_origin_folds(index)
     origins = [f.origin for f in folds]
     assert all(o.hour == 0 and o.minute == 0 for o in origins)
     spacings = {b - a for a, b in zip(origins, origins[1:], strict=False)}
-    assert spacings == {pd.Timedelta("7D")}
+    assert spacings == {pd.Timedelta("5D")}  # 7D aliased every fold onto one weekday
 
 
 def test_expanding_window_grows_from_data_start(index):

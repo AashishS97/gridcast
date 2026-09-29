@@ -1,0 +1,18 @@
+﻿# Periods where ENTSO-E NL actual load is known-corrupt.
+# Applied at model-load time by gridcast.models.exclusions: load_mw is
+# MASKED to NaN (hourly grid kept intact), features.parquet is never edited.
+# All times UTC. Boundaries padded ~1 day each side: the defect is
+# month-aligned at daily resolution, but its exact start/end hour has not
+# been verified (UTC vs local midnight).
+# Evidence: notebooks/phase3_data_state.py, run 2026-09-29.
+
+[[exclusion]]
+start = "2026-06-30T00:00:00Z"
+end = "2026-08-02T00:00:00Z"
+reason = "NL actual load ~0.65x same-week 2023-25 levels 2026-07-01..07-28, missing 07-29..07-31; not revised upstream as of 2026-09-29"
+evidence = "phase3_data_state.py: YoY LOW run 2026-07-01 -> 2026-07-28 (median 0.65); July mean 8,015 MW vs 11,920-12,375 MW in 2023-25"
+
+[[exclusion]]
+start = "2026-08-31T00:00:00Z"
+reason = "NL actual load ~0.73x same-week 2023-25 levels from 2026-09-01; open-ended until a refetch shows it revised"
+evidence = "phase3_data_state.py: YoY LOW run 2026-09-01 -> 2026-09-29 (median 0.73); September mean 9,400 MW vs 12,561-12,857 MW in 2023-25"

@@ -86,7 +86,7 @@ def rolling_origin_folds(
     *,
     min_train: str | pd.Timedelta = "364D",
     horizon: str | pd.Timedelta = "24h",
-    step: str | pd.Timedelta = "7D",
+    step: str | pd.Timedelta = "5D",
     expanding: bool = True,
     max_folds: int | None = None,
 ) -> list[Fold]:
