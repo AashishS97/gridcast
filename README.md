@@ -1,4 +1,4 @@
-﻿# GridCast
+# GridCast
 
 Probabilistic forecasting of Dutch hourly electricity load with prediction
 intervals, backtesting, drift monitoring, automated retraining, and
