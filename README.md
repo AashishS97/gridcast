@@ -1,13 +1,14 @@
-# GridCast
+﻿# GridCast
 
 Probabilistic forecasting of Dutch hourly electricity load with prediction
 intervals, backtesting, drift monitoring, automated retraining, and
 LLM-generated daily forecast reports. Built on real data from the ENTSO-E
 Transparency Platform and Open-Meteo.
 
-**Status: Phase 2 (models & backtesting) complete.** Data pipeline and
-modeling are built and tested; probabilistic intervals, serving, and
-monitoring are planned - see roadmap.
+**Status: Phase 3 (probabilistic forecasting) complete.** Data pipeline,
+point and quantile models, calibrated prediction intervals and a trust
+flag are built and tested; serving and monitoring are planned - see
+roadmap.
 
 ## Why this project
 
@@ -53,8 +54,10 @@ flowchart LR
     end
 ```
 
-The Ingest, Features, and point-forecast Model stages are built (quantile
-regression is Phase 3); Serve, Monitor, and Report are roadmap.
+The Ingest, Features and Model stages are built, including quantile
+regression, conformal calibration and a trust flag; backtesting exists as
+offline evaluation. Serve, drift detection, the dashboard and Report are
+roadmap.
 
 ## What works today
 
@@ -66,7 +69,7 @@ This fetches ~3 years of Dutch load (actual + TSO day-ahead forecast) at
 native 15-minute resolution, caches it as monthly parquet, cleans it,
 aggregates to hourly, joins population-weighted national weather and
 calendar features, and writes `data/processed/features.parquet`
-(~26,900 hourly rows, 13 columns). Re-runs are idempotent: immutable
+(~28,500 hourly rows, 13 columns). Re-runs are idempotent: immutable
 months and cached weather are skipped; recent months are refetched
 because ENTSO-E revises recent actuals. `--offline` rebuilds everything
 from the raw cache with no network.
@@ -78,6 +81,13 @@ On top of that, the modeling layer runs the full Phase 2 evaluation:
     uv run python -m gridcast.models.run_ablation  # feature-group ablations
     uv run python -m gridcast.models.compare       # failure-mode breakdowns
     uv run python -m gridcast.models.run_holdout   # one-shot frozen holdout
+
+and the Phase 3 probabilistic layer:
+
+    uv run python -m gridcast.models.quantile_lgbm       # p10/p50/p90 on the 140 pinned folds
+    uv run python -m gridcast.models.conformal           # conformal calibration of the intervals
+    uv run python -m gridcast.models.trust               # trust-flag evaluation
+    uv run python -m gridcast.models.run_holdout_phase3  # sealed holdout (one-shot; already spent)
 
 ## Results (Phase 2)
 
@@ -96,8 +106,9 @@ it on 88.9% of holdout days; the dev-to-holdout degradation was +10%,
 i.e. the backtest estimate was honest. Weather features use historical
 actuals (perfect prognosis, stated below); the no-weather ablation
 brackets production skill at 2.2-2.3% MAPE. The TSO day-ahead forecast
-was evaluated as a feature and as a benchmark: it is systematically
-amplitude-damped for NL, adds no marginal accuracy as a feature, and was
+was evaluated as a feature and as a benchmark: for NL it is systematically
+biased low (monthly median actual/TSO ratio 1.06-1.36, seasonal) as well
+as amplitude-damped, adds no marginal accuracy as a feature, and was
 dropped from the production configuration to remove a runtime dependency.
 
 Averages are not the whole story - the per-horizon, per-hour, and
@@ -107,6 +118,53 @@ its single worst backtest day (2024-12-16) was a warm winter Monday
 where the learned temperature-demand relationship failed - the TSO's
 forecast made the same directional error. That day is the motivating
 example for the prediction intervals in Phase 3.
+
+## Results (Phase 3)
+
+Probabilistic 24h-ahead forecasts: one LightGBM quantile model per level
+(p10/p50/p90), conformal calibration from the model's own recent
+out-of-sample errors, and a trust flag. Scored on the same 140 pinned
+folds as Phase 2; the median (tau = 0.5, which is the L1 objective)
+reproduces Phase 2's model exactly (269.9 MW MAE), which validates the
+pipeline end to end.
+
+| | Raw quantiles | Conformal-calibrated | Sealed holdout (Aug 2026, calibrated) |
+|---|---|---|---|
+| 80% interval coverage | 63.0% | 79.1% | 73.6% |
+| Median MAE (MW) | 269.5 | 259.0 | 243.2 |
+| Mean pinball loss | 96.3 | 91.4 | 77.2 |
+| Interval score | 1,541 | 1,448 | 1,101 |
+
+Backtest columns use the 134 folds with calibration history. The holdout
+(15 origins, weekly seasonal naive: 559 MW MAE) was scored exactly once.
+
+- **The raw intervals were overconfident and biased low.** Conformal
+  calibration (asymmetric CQR, trailing ~60 days, window fixed in advance;
+  a 120-day sensitivity check agrees) fixes average calibration at the
+  cost of 45% wider intervals. The proper scores improve, so the extra
+  width is justified. Calibration is marginal, not conditional: nights end
+  up over-covered, the evening peak under-covered, and after a bad episode
+  the trailing window over-corrects.
+- **Rare inside the training range is enough to fail.** No test hour was
+  colder than its fold's training minimum, yet the median bias grows
+  steadily into the cold tail (+383 MW in the coldest 2% of hours vs +92 MW
+  in the middle). On holidays the model widens its own intervals (p90
+  coverage 0.89); bridge days are missing from the calendar features.
+- **Many of the worst misses were unforecastable.** Using the TSO forecast
+  as an independent witness, the worst days were mostly missed by the TSO
+  too, often by more.
+- **Trust flag** (forecast-time signals: cold tail, irregular calendar
+  days, recent calibration instability, input-data integrity): flags
+  21.5% of hours; flagged hours show 43% higher median error and a 1.44x
+  worse interval score, and capture 39% of the largest errors (1.8x lift).
+  It predicts lower precision rather than interval failure. Thresholds
+  were declared before evaluation but motivated by the same backtest, so
+  these results are descriptive.
+- **Behaviour after a data outage:** the first holdout week could only be
+  calibrated on June errors (July was corrupted upstream) and covered 67%;
+  once fresh August errors were available, coverage recovered to 80%.
+
+Full numbers, method notes and caveats: `reports/phase3/RESULTS.md`.
 
 ## Pipeline design
 
@@ -139,6 +197,14 @@ example for the prediction intervals in Phase 3.
   7-day fold step made every test day a Saturday; the step is 5 days
   (coprime with 7) so all weekdays are evaluated. Caught by reading
   the per-horizon error table, not by luck.
+- **Evaluation windows are pinned, not derived.** The fold origins and
+  holdouts live in `configs/evaluation.toml`, with a sealed/spent status
+  per holdout; deriving them from "end of data" made them move on every
+  refetch.
+- **Corrupted data is masked, not dropped.** `configs/data_exclusions.toml`
+  sets the target to NaN in known-bad periods, keeping the hourly grid
+  intact for row-based rolling windows; forecasts whose inputs touch a
+  masked period are not scored.
 - **Leak-proof by construction, not by vigilance.** One feature builder,
   parameterized by forecast origin, generates both training rows
   (replayed historical origins) and inference rows. Rolling statistics
@@ -174,14 +240,16 @@ same investigation are repaired by the cleaning rules.
 
 The frozen holdout detected a live upstream data incident: from late
 June 2026, ENTSO-E's published NL actual load collapsed to physically
-implausible values (down to ~330 MW national midday load) while the
-TSO's independent day-ahead forecast stream stayed normal. Refetching
-showed ENTSO-E has since revised late June to sane values; July 2026
-remains corrupted pending revision. Holdout scoring quarantines the
-affected window and reports it separately. The practical lesson feeds
-Phase 4: recently published actuals are provisional and need
-plausibility gates and trailing-window re-verification before a
-daily-retraining system may ingest them.
+implausible values while the TSO's independent day-ahead forecast stream
+stayed normal. ENTSO-E has since revised late June, but July 2026 remains
+corrupted (0.65x the same weeks in 2023-25), and the defect returned in
+September 2026 (0.73x) with a clean August in between. Detection now
+compares load with its own history rather than with the TSO stream,
+which turned out to be biased low. The affected periods are masked via
+`configs/data_exclusions.toml`, each with its reason and evidence. The
+practical lesson feeds the serving phases: recently published actuals are
+provisional and need plausibility gates and trailing-window
+re-verification before a daily-retraining system may ingest them.
 
 ## Known limitations (deliberate, documented)
 
@@ -198,19 +266,25 @@ daily-retraining system may ingest them.
   have, which cuts the other way. Both are footnoted, not corrected.
 - Dutch school vacations (staggered across three regions) are not yet
   a feature; the worst backtest folds cluster on holiday-adjacent and
-  DST-adjacent days.
+  DST-adjacent days. Bridge days are also missing.
 - City weights for the national weather aggregate are approximate,
   Randstad-heavy; CBS population data would make them rigorous.
 - The static lower load bound cannot catch a night-time sag to a few
   hundred MW; spike and flatline checks are the backstop.
-- The holdout cutoff is computed relative to the end of the data
-  ("last 56 days"); a rebuild that appends data silently shifts it.
-  Phase 3 pins the cutoff to a fixed timestamp in config.
-- ENTSO-E actuals for July 2026 are corrupted upstream (see second
-  finding); evaluation code quarantines the window until revised.
+- ENTSO-E actuals for July and September 2026 are corrupted upstream
+  (see second finding); the September defect has not yet been traced
+  to raw XML.
 - Open-Meteo's archive API lags ~5 days behind real time, leaving
   recent hours without weather; production needs a fallback to the
-  forecast endpoint.
+  forecast endpoint. The weather cache also never refreshes on its own.
+- Interval calibration is marginal only: hour-of-day and cold-tail
+  conditional calibration are not solved.
+- The trust flag was designed on the backtest it is evaluated on; its
+  only out-of-sample test (August) contained no cold or calendar cases.
+  Its instability signal uses a per-hour threshold that should be
+  per-origin.
+- Origins are midnight UTC, so horizon and hour of day are perfectly
+  confounded in all per-horizon analyses.
 
 ## Project structure
 
@@ -219,19 +293,20 @@ daily-retraining system may ingest them.
     |   |-- data/        # ENTSO-E client, weather, quality checks, cleaning
     |   |-- features/    # Calendar features, feature-table build
     |   |-- models/      # Splits, metrics, baselines, SARIMAX, LightGBM,
-    |   |                # backtest harness, ablations, holdout evaluation
+    |   |                # quantile models, conformal calibration, trust
+    |   |                # flag, backtest harness, holdout evaluation
     |   |-- api/         # (Phase 4) FastAPI forecast endpoint
     |   |-- monitoring/  # (Phase 4) Drift detection, quality tracking
     |   |-- build.py     # One-command raw -> clean -> features pipeline
     |-- data/            # Raw & processed data (gitignored, reproducible)
     |-- notebooks/       # Exploration & diagnosis only - logic lives in src/
-    |-- reports/         # Generated evaluation reports (phase2/)
-    |-- tests/           # 55 unit tests, no network required
-    |-- configs/         # Model hyperparameters (Phase 3+)
+    |-- reports/         # Evaluation reports (phase2/, phase3/)
+    |-- tests/           # 99 unit tests, no network required
+    |-- configs/         # Data exclusions, pinned evaluation windows
 
 ## Testing
 
-`uv run pytest` - 55 unit tests, no network required. Highlights: DST
+`uv run pytest` - 99 unit tests, no network required. Highlights: DST
 boundary behaviour on both switch days; rolling-origin folds proven
 non-overlapping and midnight-aligned; Fourier regressors tested for
 actual periodicity (which caught a timestamp-resolution bug that gave
@@ -239,7 +314,12 @@ the daily seasonal term a ~1000-day wavelength); a leakage canary that
 corrupts every target value at/after the forecast origin and asserts
 zero feature bits change; and a context-independence test proving a
 feature row built alone (inference) is bit-identical to the same row
-built during training replay.
+built during training replay. Phase 3 adds: the pinball loss's defining
+property (its minimizer is the tau-quantile) checked numerically; the
+interval score / pinball identity; rearrangement never increasing the
+loss, row by row; a perturb-the-future test proving conformal
+calibration never reads later folds; and an exclusion-soundness test run
+against the real design-matrix builder.
 
 ## Setup
 
@@ -260,8 +340,8 @@ built during training replay.
 2. ~~Point models & backtesting: time-series splits, baselines, SARIMAX,
    LightGBM with leak-proof multi-horizon features, ablations, frozen
    holdout~~ (done)
-3. Probabilistic forecasts: LightGBM quantile regression, calibrated
-   prediction intervals
+3. ~~Probabilistic forecasts: LightGBM quantile regression, conformal
+   calibration, failure analysis, trust flag, sealed holdout~~ (done)
 4. Serving: FastAPI + Docker, scheduled retraining, drift monitoring,
    Streamlit dashboard
 5. LLM-generated daily forecast commentary
