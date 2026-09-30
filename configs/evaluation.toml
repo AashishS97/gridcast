@@ -1,4 +1,4 @@
-﻿# Pinned evaluation windows: the contract every phase is scored on.
+# Pinned evaluation windows: the contract every phase is scored on.
 # Phase 2 derived windows from "end of data", so they moved on every
 # refetch. Recovered 2026-09-29 from data/backtests/*.parquet and pinned.
 # All times UTC. Origins are midnight UTC; each forecasts [origin, origin+24h).
@@ -22,5 +22,5 @@ note = "Scored once in Phase 2 (297 MW MAE on its clean 27-origin window). July 
 [holdout.phase3]
 first_origin = "2026-08-16T00:00:00Z"
 last_origin = "2026-08-30T00:00:00Z"
-status = "sealed"
+status = "spent"  # scored once 2026-09-30 -> data/backtests/holdout_phase3.parquet
 note = "15 clean origins between the July and September exclusions (336h lookback). Scored exactly once, at the end of Phase 3. Confirmation, not headline."
