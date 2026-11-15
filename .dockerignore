@@ -1,0 +1,13 @@
+# Whitelist: the image gets only what serving needs. Everything else
+# (.venv, .env with the API key, raw data, snapshots, notebooks) stays out.
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!src/
+!configs/
+!models/
+!data/processed/features.parquet
+**/__pycache__
+**/*.pyc
+models/*.partial
