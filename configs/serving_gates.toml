@@ -1,0 +1,9 @@
+﻿# Request-time serving gates (read by gridcast.serving.forecaster).
+#
+# provisional_days: refuse origins whose 336h lookback reaches into the last
+# N days before the data vintage (the newest actual-load timestamp). ENTSO-E
+# NL actual load is published ~20-35% low for ~28 days and revised later
+# (three episodes, verified 2026-11-15; see configs/data_exclusions.toml).
+# 29 = 28 + 1 day margin, the same padding the exclusions use.
+[gates]
+provisional_days = 29
