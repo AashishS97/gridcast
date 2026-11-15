@@ -2,7 +2,6 @@
 code: output contract, shift arithmetic, every gate at its boundary, a
 serving leakage canary, and tamper detection."""
 
-import json
 import shutil
 
 import numpy as np
@@ -10,15 +9,10 @@ import pandas as pd
 import pytest
 
 from gridcast.models.exclusions import Exclusion
-from gridcast.models.export_artifact import mask_from, save_models
-from gridcast.models.metrics import DEFAULT_QUANTILES
-from gridcast.models.ml_features import build_design_matrix, daily_origins
-from gridcast.models.quantile_lgbm import fit_quantile_models
 from gridcast.serving.forecaster import (
     ArtifactError,
     Forecaster,
     NotServable,
-    file_sha256,
     load_artifact,
 )
 
@@ -32,24 +26,8 @@ def utc(s: str) -> pd.Timestamp:
 
 
 @pytest.fixture(scope="module")
-def artifact_dir(synthetic_frame, tmp_path_factory):
-    out = tmp_path_factory.mktemp("artifact")
-    origins = daily_origins(pd.DatetimeIndex(synthetic_frame["timestamp"]))
-    origins = origins[np.asarray(origins <= CUTOFF)]
-    matrix = build_design_matrix(mask_from(synthetic_frame, CUTOFF), origins)
-    models, feats = fit_quantile_models(matrix, CUTOFF)
-    save_models(models, out)
-    manifest = {
-        "artifact": "synthetic",
-        "train_cutoff": CUTOFF.isoformat(),
-        "quantiles": dict(DEFAULT_QUANTILES),
-        "features": feats,
-        "calibration": {"shifts_mw": SHIFTS},
-        "inputs": {"features_sha256": "not-a-real-hash"},
-        "files": {p.name: file_sha256(p) for p in sorted(out.glob("*.txt"))},
-    }
-    (out / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-    return out
+def artifact_dir(synthetic_artifact_dir):
+    return synthetic_artifact_dir
 
 
 @pytest.fixture(scope="module")
