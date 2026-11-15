@@ -1,6 +1,7 @@
 """Unit tests for quality checks, on synthetic data with planted defects."""
 
 import pandas as pd
+
 from gridcast.data import quality
 
 

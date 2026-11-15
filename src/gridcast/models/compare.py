@@ -89,9 +89,7 @@ def main() -> None:
     # 6. Win rate: on what fraction of folds does lightgbm beat the naive?
     wide = per_fold.pivot(index="fold", columns="model", values="fold_mae")
     wins = (wide["lightgbm"] < wide["seasonal_naive_168"]).mean()
-    emit(
-        "Head-to-head", f"lightgbm beats seasonal_naive_168 on " f"{wins:.1%} of {len(wide)} folds"
-    )
+    emit("Head-to-head", f"lightgbm beats seasonal_naive_168 on {wins:.1%} of {len(wide)} folds")
 
     (REPORT_DIR / "comparison.md").write_text(
         "# Phase 2 model comparison\n\n" + "\n".join(sections), encoding="utf-8"

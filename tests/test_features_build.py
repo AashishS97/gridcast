@@ -1,6 +1,7 @@
 """Unit tests for the feature-table join. No files, no network."""
 
 import pandas as pd
+
 from gridcast.features.build import build_feature_table
 
 

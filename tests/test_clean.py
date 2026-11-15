@@ -1,6 +1,7 @@
 """Unit tests for the cleaning module, on synthetic data."""
 
 import pandas as pd
+
 from gridcast.data import clean
 from gridcast.data.base import LoadKind
 

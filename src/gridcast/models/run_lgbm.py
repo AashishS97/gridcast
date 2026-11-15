@@ -63,8 +63,7 @@ def main() -> None:
         )
         if fold.fold_id % 20 == 0:
             print(
-                f"  fold {fold.fold_id:3d}/{len(folds)}  "
-                f"({time.perf_counter() - t0:.0f}s elapsed)"
+                f"  fold {fold.fold_id:3d}/{len(folds)}  ({time.perf_counter() - t0:.0f}s elapsed)"
             )
 
     results = pd.concat(records, ignore_index=True)

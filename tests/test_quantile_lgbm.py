@@ -3,6 +3,7 @@ sanity on synthetic data (fast; not a performance test)."""
 
 import numpy as np
 import pandas as pd
+
 from gridcast.models.lgbm import LGBM_PARAMS
 from gridcast.models.ml_features import (
     CALENDAR_COLS,

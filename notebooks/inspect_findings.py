@@ -1,6 +1,7 @@
 """One-off exploration of quality findings. Not part of the pipeline."""
 
 import pandas as pd
+
 from gridcast.data import quality
 from gridcast.data.base import LoadKind
 from gridcast.data.fetch import load_raw

@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+
 from gridcast.models.backtest import run_backtest
 from gridcast.models.baselines import (
     make_external_benchmark,

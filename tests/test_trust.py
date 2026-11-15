@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+
 from gridcast.models.exclusions import Exclusion
 from gridcast.models.trust import (
     FLAG_COLS,

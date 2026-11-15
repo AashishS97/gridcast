@@ -2,6 +2,7 @@
 only once its whole target day has been observed."""
 
 import pandas as pd
+
 from gridcast.models.run_holdout_phase3 import calibration_pool
 
 

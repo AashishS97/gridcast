@@ -2,6 +2,7 @@
 
 import pandas as pd
 import pytest
+
 from gridcast.data.base import NoDataError
 from gridcast.data.entsoe import _parse_load_xml
 

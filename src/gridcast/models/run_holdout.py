@@ -140,11 +140,11 @@ def main() -> None:
     clean = holdout[holdout["window"] == "clean"]
     quarantined = holdout[holdout["window"] == "quarantined"]
 
-    print(f"\n=== HOLDOUT (CLEAN window, origins before " f"{QUARANTINE_START.date()}) ===")
+    print(f"\n=== HOLDOUT (CLEAN window, origins before {QUARANTINE_START.date()}) ===")
     overall = summarize(clean).sort_values("mae")
     print(fmt(overall.set_index("model")))
 
-    print("\n=== HOLDOUT (QUARANTINED window — upstream data incident, " "documentation only) ===")
+    print("\n=== HOLDOUT (QUARANTINED window — upstream data incident, documentation only) ===")
     print(fmt(summarize(quarantined).sort_values("mae").set_index("model")))
 
     print("\n=== Dev estimate vs CLEAN holdout (MAE) ===")
@@ -176,7 +176,7 @@ def main() -> None:
 
     wide = per_fold.pivot(index="fold", columns="model", values="fold_mae")
     wins = (wide["lightgbm_no_da"] < wide["seasonal_naive_168"]).mean()
-    print(f"\nlightgbm_no_da beats seasonal_naive_168 on {wins:.1%} of " f"{len(wide)} clean days")
+    print(f"\nlightgbm_no_da beats seasonal_naive_168 on {wins:.1%} of {len(wide)} clean days")
 
     dates = (
         clean[clean["model"] == "lightgbm_no_da"]

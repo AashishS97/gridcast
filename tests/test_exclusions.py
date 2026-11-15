@@ -4,6 +4,7 @@ the contamination rule against the REAL design-matrix builder."""
 import numpy as np
 import pandas as pd
 import pytest
+
 from gridcast.models.exclusions import (
     LOOKBACK_HOURS,
     Exclusion,

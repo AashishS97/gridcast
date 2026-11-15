@@ -45,7 +45,7 @@ for yr in (2023, 2024, 2025, 2026):
     w = midday[(midday.index >= lo) & (midday.index < hi)]
     if len(w):
         print(
-            f"{yr}: n={len(w):5d}  min {w.min():8,.0f}  p10 {w.quantile(.10):8,.0f}"
+            f"{yr}: n={len(w):5d}  min {w.min():8,.0f}  p10 {w.quantile(0.10):8,.0f}"
             f"  median {w.median():8,.0f}  mean {w.mean():8,.0f}"
         )
     else:

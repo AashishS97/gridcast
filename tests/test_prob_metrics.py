@@ -4,6 +4,7 @@ property of the pinball loss, and the identities that tie metrics together."""
 import numpy as np
 import pandas as pd
 import pytest
+
 from gridcast.models.metrics import (
     crossing_rate,
     interval_coverage,

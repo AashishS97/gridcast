@@ -19,6 +19,7 @@ import os
 
 import pandas as pd
 from dotenv import load_dotenv
+
 from gridcast.data.base import LoadKind, NoDataError
 from gridcast.data.entsoe import EntsoeClient
 from gridcast.data.fetch import RAW_DIR, load_raw
