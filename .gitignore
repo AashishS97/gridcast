@@ -27,3 +27,5 @@ models/artifacts/
 .DS_Store
 .vscode/
 .idea/
+
+data/snapshots/

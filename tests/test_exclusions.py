@@ -119,6 +119,34 @@ def test_load_exclusions_rejects_bad_config(tmp_path, body):
 
 
 def test_repo_config_loads():
+    """The real config parses and every active period is well-formed. The
+    NUMBER of periods is data state, not an invariant: periods are added and
+    resolved as upstream data changes."""
     ex = load_exclusions()
-    assert len(ex) >= 2
-    assert all(e.reason and e.evidence for e in ex)
+    for e in ex:
+        assert e.start.utcoffset().total_seconds() == 0
+        assert e.end is None or e.end > e.start
+        assert e.reason.strip() and e.evidence.strip()
+
+
+def test_resolved_tables_are_ignored(tmp_path):
+    """[[resolved]] keeps history in the config; the loader must not apply it."""
+    cfg = tmp_path / "ex.toml"
+    cfg.write_text(
+        "[[exclusion]]\n"
+        'start = "2026-10-17T00:00:00Z"\n'
+        'reason = "r"\n'
+        'evidence = "e"\n'
+        "\n"
+        "[[resolved]]\n"
+        'start = "2026-06-30T00:00:00Z"\n'
+        'end = "2026-08-02T00:00:00Z"\n'
+        'reason = "r"\n'
+        'evidence = "e"\n'
+        'resolution = "fixed upstream"\n',
+        encoding="utf-8",
+    )
+    ex = load_exclusions(cfg)
+    assert len(ex) == 1
+    assert str(ex[0].start) == "2026-10-17 00:00:00+00:00"
+    assert ex[0].end is None

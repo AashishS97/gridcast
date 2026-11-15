@@ -1,18 +1,31 @@
-﻿# Periods where ENTSO-E NL actual load is known-corrupt.
+﻿# Periods where ENTSO-E NL actual load is known-bad.
 # Applied at model-load time by gridcast.models.exclusions: load_mw is
 # MASKED to NaN (hourly grid kept intact), features.parquet is never edited.
-# All times UTC. Boundaries padded ~1 day each side: the defect is
-# month-aligned at daily resolution, but its exact start/end hour has not
-# been verified (UTC vs local midnight).
-# Evidence: notebooks/phase3_data_state.py, run 2026-09-29.
+# All times UTC. Only [[exclusion]] tables are applied. [[resolved]] tables
+# are history (periods once excluded, later fixed upstream); the loader
+# ignores them.
+#
+# Known mechanism (verified 2026-11-15 over three episodes): ENTSO-E NL
+# actual load from roughly the last 28 days before a fetch is PROVISIONAL,
+# published 20-35% low, and revised afterwards. Boundary measured on the
+# June 30 revision: provisional from 13:45 UTC, cache fetched 2026-07-28
+# 14:24 UTC. The TSO day-ahead stream is not affected.
+# Evidence: notebooks/phase4_recheck_entsoe.py, notebooks/phase4_vintage_diff.py.
 
 [[exclusion]]
+start = "2026-10-17T00:00:00Z"
+reason = "Provisional publication window: NL actual load ~0.75-0.85x same-week 2023-25 levels from 2026-10-19, while actual/TSO falls to 0.95 (normal ~1.15-1.25). Estimated boundary 2026-10-18 ~14:00 UTC (28 days before the 2026-11-15 fetch), padded ~1 day. Open-ended: close after a refetch shows it revised."
+evidence = "phase4_recheck_entsoe.py and phase3_data_state.py, run 2026-11-15: YoY LOW runs 2026-10-19 -> 2026-11-15 (median 0.76-0.83)"
+
+[[resolved]]
 start = "2026-06-30T00:00:00Z"
 end = "2026-08-02T00:00:00Z"
 reason = "NL actual load ~0.65x same-week 2023-25 levels 2026-07-01..07-28, missing 07-29..07-31; not revised upstream as of 2026-09-29"
 evidence = "phase3_data_state.py: YoY LOW run 2026-07-01 -> 2026-07-28 (median 0.65); July mean 8,015 MW vs 11,920-12,375 MW in 2023-25"
+resolution = "Revised upstream, verified 2026-11-15: refetched values 1.60x the cached vintage, YoY 1.02-1.08 in line with clean months, missing days filled. Cause was provisional publication (~28-day window, starting 2026-06-30 13:45 UTC), not corruption."
 
-[[exclusion]]
+[[resolved]]
 start = "2026-08-31T00:00:00Z"
 reason = "NL actual load ~0.73x same-week 2023-25 levels from 2026-09-01; open-ended until a refetch shows it revised"
 evidence = "phase3_data_state.py: YoY LOW run 2026-09-01 -> 2026-09-29 (median 0.73); September mean 9,400 MW vs 12,561-12,857 MW in 2023-25"
+resolution = "Revised upstream, verified 2026-11-15: refetched values 1.42x the cached vintage (672 of 682 cached hours changed), YoY 1.04-1.07. Same provisional-publication mechanism."
