@@ -63,15 +63,16 @@ def quantile_params(tau: float) -> dict:
     return params
 
 
-def fit_predict_fold_quantiles(
+def fit_quantile_models(
     matrix: pd.DataFrame,
     fold_origin: pd.Timestamp,
     quantiles: dict[str, float] = DEFAULT_QUANTILES,
     drop_features: tuple[str, ...] = DROP_FEATURES,
-) -> tuple[dict[str, np.ndarray], dict[str, int]]:
-    """Train one model per quantile on origins strictly before fold_origin,
-    predict its 24 rows. Returns (raw predictions by name, best_iteration by
-    name). Same train/validation carving as Phase 2's fit_predict_fold."""
+) -> tuple[dict[str, lgb.LGBMRegressor], list[str]]:
+    """Train one model per quantile on origins strictly before fold_origin.
+    Returns (fitted models by name, feature columns in model order). Same
+    train/validation carving as Phase 2's fit_predict_fold. Shared by the
+    backtest and the serving export, so both train identically."""
     feats = [c for c in feature_columns(matrix) if c not in drop_features]
 
     train = matrix[(matrix["origin"] < fold_origin) & matrix["y_true"].notna()]
@@ -83,12 +84,7 @@ def fit_predict_fold_quantiles(
     if core.empty or val.empty:
         raise ValueError(f"fold at {fold_origin}: cannot carve a {VAL_SPAN} validation span")
 
-    test = matrix[matrix["origin"] == fold_origin].sort_values("horizon")
-    if len(test) != 24:
-        raise ValueError(f"expected 24 rows for origin {fold_origin}, got {len(test)}")
-
-    preds: dict[str, np.ndarray] = {}
-    iters: dict[str, int] = {}
+    models: dict[str, lgb.LGBMRegressor] = {}
     for name, tau in quantiles.items():
         model = lgb.LGBMRegressor(**quantile_params(tau))
         model.fit(
@@ -99,10 +95,27 @@ def fit_predict_fold_quantiles(
             eval_metric="quantile",
             callbacks=[lgb.early_stopping(stopping_rounds=100, verbose=False)],
         )
-        preds[name] = np.asarray(
-            model.predict(test[feats], num_iteration=model.best_iteration_), dtype=float
-        )
-        iters[name] = int(model.best_iteration_ or 0)
+        models[name] = model
+    return models, feats
+
+
+def fit_predict_fold_quantiles(
+    matrix: pd.DataFrame,
+    fold_origin: pd.Timestamp,
+    quantiles: dict[str, float] = DEFAULT_QUANTILES,
+    drop_features: tuple[str, ...] = DROP_FEATURES,
+) -> tuple[dict[str, np.ndarray], dict[str, int]]:
+    """Train via fit_quantile_models, predict fold_origin's 24 rows. Returns
+    (raw predictions by name, best_iteration by name)."""
+    models, feats = fit_quantile_models(matrix, fold_origin, quantiles, drop_features)
+    test = matrix[matrix["origin"] == fold_origin].sort_values("horizon")
+    if len(test) != 24:
+        raise ValueError(f"expected 24 rows for origin {fold_origin}, got {len(test)}")
+    preds = {
+        n: np.asarray(m.predict(test[feats], num_iteration=m.best_iteration_), dtype=float)
+        for n, m in models.items()
+    }
+    iters = {n: int(m.best_iteration_ or 0) for n, m in models.items()}
     return preds, iters
 
 

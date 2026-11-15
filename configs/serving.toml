@@ -1,0 +1,13 @@
+﻿# Serving artifact contract: one frozen model per training cutoff.
+# Read by gridcast.models.export_artifact. All times UTC.
+#
+# train_cutoff (C): models and conformal shifts see actual load strictly
+# before C; the artifact may serve forecast origins >= C only. Chosen
+# 2026-11-15: latest month start before the provisional window (excluded from
+# 2026-10-17), leaving origins 2026-10-01 .. 2026-10-17 servable with a clean
+# 336h lookback, and calibrating on fresh Aug-Sep 2026 residuals.
+[artifact]
+train_cutoff = "2026-10-01T00:00:00Z"
+calibration_window_days = 60   # = Phase 3 CAL_WINDOW (W=12 folds x 5D step)
+min_calibration_origins = 6    # = Phase 3 MIN_CAL_ORIGINS
+output_root = "models"
