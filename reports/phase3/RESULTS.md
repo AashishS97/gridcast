@@ -5,6 +5,15 @@ Phase 2 folds (2024-06-29 -> 2026-05-25, 5-day step, 24 h horizon, expanding
 window); calibrated comparisons use the 134 folds with calibration history.
 Holdout = 15 sealed August 2026 origins, scored exactly once.
 
+> **Correction (2026-11-16):** the two "corrupted" months below were
+> provisional publications, not corruption. ENTSO-E later revised both
+> (July to 1.60x and September to 1.42x the values cached here),
+> consistent with a ~28-day provisional window seen in three episodes.
+> Every number in this report stands: the backtest ends in May 2026 and
+> its inputs were verified unchanged on the revised data, and August,
+> where the holdout was scored, is unchanged. Details: README, "A second
+> finding from the data".
+
 ## 1. Data state (step 0)
 
 - **Two corrupted months of ENTSO-E NL actual load.** Compared with the same ISO
@@ -179,5 +188,7 @@ is one day of evidence, not validation.
   calibration are not solved.
 - The trust-flag design is in-sample; its only out-of-sample test (August)
   contained no cold or calendar cases.
-- September 2026's upstream corruption is not yet traced to raw XML.
+- ~~September 2026's upstream corruption is not yet traced to raw XML.~~
+  Resolved 2026-11-16: provisional data, since revised upstream (see the
+  correction at the top).
 - Horizon and hour of day are confounded (midnight-UTC origins).

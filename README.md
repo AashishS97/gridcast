@@ -5,10 +5,10 @@ intervals, backtesting, drift monitoring, automated retraining, and
 LLM-generated daily forecast reports. Built on real data from the ENTSO-E
 Transparency Platform and Open-Meteo.
 
-**Status: Phase 3 (probabilistic forecasting) complete.** Data pipeline,
-point and quantile models, calibrated prediction intervals and a trust
-flag are built and tested; serving and monitoring are planned - see
-roadmap.
+**Status: Phase 4 (serving) complete.** Data pipeline, point and quantile
+models, calibrated prediction intervals, a trust flag, and a gated FastAPI
+service in Docker are built and tested; drift monitoring, scheduled
+retraining and the dashboard are next - see roadmap.
 
 ## Why this project
 
@@ -69,7 +69,7 @@ This fetches ~3 years of Dutch load (actual + TSO day-ahead forecast) at
 native 15-minute resolution, caches it as monthly parquet, cleans it,
 aggregates to hourly, joins population-weighted national weather and
 calendar features, and writes `data/processed/features.parquet`
-(~28,500 hourly rows, 13 columns). Re-runs are idempotent: immutable
+(~29,600 hourly rows as of 2026-11-15, 13 columns). Re-runs are idempotent: immutable
 months and cached weather are skipped; recent months are refetched
 because ENTSO-E revises recent actuals. `--offline` rebuilds everything
 from the raw cache with no network.
@@ -88,6 +88,11 @@ and the Phase 3 probabilistic layer:
     uv run python -m gridcast.models.conformal           # conformal calibration of the intervals
     uv run python -m gridcast.models.trust               # trust-flag evaluation
     uv run python -m gridcast.models.run_holdout_phase3  # sealed holdout (one-shot; already spent)
+
+and the Phase 4 serving layer:
+
+    uv run python -m gridcast.models.export_artifact   # freeze models + conformal shifts at the configured cutoff
+    uv run uvicorn gridcast.api.app:app --port 8000     # gated forecast API (or docker build/run)
 
 ## Results (Phase 2)
 
@@ -161,10 +166,107 @@ Backtest columns use the 134 folds with calibration history. The holdout
   were declared before evaluation but motivated by the same backtest, so
   these results are descriptive.
 - **Behaviour after a data outage:** the first holdout week could only be
-  calibrated on June errors (July was corrupted upstream) and covered 67%;
+  calibrated on June errors (July was masked as corrupt at the time; it
+  was later revised upstream, see the second finding) and covered 67%;
   once fresh August errors were available, coverage recovered to 80%.
 
 Full numbers, method notes and caveats: `reports/phase3/RESULTS.md`.
+
+## Phase 4: serving
+
+A frozen model behind a FastAPI service in Docker. It serves exactly the
+pipeline that was evaluated, and refuses requests it cannot answer
+honestly.
+
+```
+docker build -t gridcast:local .
+docker run --rm -p 8000:8000 gridcast:local     # docs at http://localhost:8000/docs
+```
+
+| Route | Returns |
+|---|---|
+| `GET /health` | artifact, training cutoff, data vintage, provisional boundary, servable range |
+| `GET /model` | the artifact manifest: file hashes, library versions, git commit, conformal shifts |
+| `GET /origins` | origins that pass every serving gate |
+| `GET /forecast?origin=2026-10-05T00:00:00Z` | 24 hourly p10/p50/p90 in MW (calibrated 80% interval) with trust flags |
+
+Example: for Monday 2026-10-05 at 19:00 local the service returns p50
+15,740 MW with an 80% interval of 15,406-16,045 MW. Timestamps are given
+in UTC and Europe/Amsterdam, but the window is the evaluated one:
+origin at midnight UTC, 24 hours ahead.
+
+**The artifact.** `python -m gridcast.models.export_artifact` freezes the
+Phase 3 production pipeline at a training cutoff (`configs/serving.toml`,
+currently 2026-10-01):
+
+- three quantile models trained on origins before the cutoff, by the
+  same function the backtest uses (no copied training loop);
+- conformal shifts from 60 out-of-sample daily forecasts (2026-08-02 to
+  09-30, one retrain per origin): p10 +5.5, p50 +109.9, p90 +236.9 MW.
+  Raw 80% coverage on that pool was 64.2%, matching Phase 3's ~63%, so
+  the overconfidence is stable - the condition a fixed shift relies on.
+  The positive median shift is the trees lagging 2026 load, which runs
+  3-6% above 2023-25;
+- a reference forecast computed from the saved model files, and a
+  manifest hashing every file plus the data, exclusions and config, with
+  the git commit.
+
+Models are LightGBM text files (no pickle), saved at their early-stopping
+iteration; the save/load round trip differs by exactly 0.0 MW. Artifacts
+are written to a `.partial` directory, renamed only when complete, and
+never overwritten.
+
+**Serving gates.** A request that fails a gate gets HTTP 422 with a
+stable code, never a degraded forecast (malformed input gets FastAPI's
+own validation error):
+
+| Code | Refused when |
+|---|---|
+| `not_midnight_utc` | origin is not midnight UTC, or has no timezone |
+| `before_cutoff` | origin precedes the training cutoff: the model trained on that day |
+| `data_unavailable` | lookback load is missing |
+| `excluded_data` | the 336 h lookback overlaps a data exclusion |
+| `provisional_data` | the lookback reaches into the last 29 days before the data vintage |
+| `weather_unavailable` | target-hour weather is missing |
+
+The exclusions encode evidence about specific periods; the 29-day rule
+(`configs/serving_gates.toml`) encodes the mechanism behind them (second
+finding below), so it also covers windows nobody has inspected. On the
+current data the two independently put the boundary at 2026-10-17: the
+service answers 17 origins, 2026-10-01 to 10-17.
+
+**Verification.**
+
+- Parity: serving the artifact at its cutoff reproduces the export's
+  reference forecast exactly - in-process, through the API, and from the
+  Linux container over HTTP against a reference computed on Windows
+  (max difference 0.0 MW).
+- Leakage canaries: corrupting load, the TSO forecast and weather from
+  the training cutoff on leaves the trained models' predictions
+  bit-identical; corrupting load from a serving origin on leaves its
+  forecast bit-identical.
+- Fail-fast startup: a missing or modified model file (sha256 mismatch)
+  stops the process instead of serving.
+- Image: multi-stage, dependencies installed from `uv.lock` with
+  `--frozen`, non-root (uid 10001), healthcheck on `/health`; a whitelist
+  `.dockerignore` keeps `.env`, raw data and the local venv out.
+
+**What this is not.**
+
+- Not live forecasting: it replays a fixed data vintage, with no live
+  ingestion, and weather features are observed weather (perfect
+  prognosis). Live serving needs a forecast-weather source and the
+  provisional-data handling above.
+- The servable window is 17 days, bounded by the training cutoff and the
+  provisional window.
+- The model is frozen: a forecast for 2026-10-17 comes from a model 16
+  days old, whereas every backtest fold retrained the day before.
+- The calibration pool is out-of-sample but not a sealed holdout (it
+  overlaps the spent August holdout); its raw q50 MAE of 246.6 MW is not
+  a headline number.
+- The image is 1.36 GB: it carries project dependencies serving never
+  imports (statsmodels, polars).
+- No authentication or rate limiting; one worker.
 
 ## Pipeline design
 
@@ -251,6 +353,25 @@ practical lesson feeds the serving phases: recently published actuals are
 provisional and need plausibility gates and trailing-window
 re-verification before a daily-retraining system may ingest them.
 
+**Update (2026-11-16): not corruption - provisional publication.** A
+refetch showed ENTSO-E had revised both months: July is now 1.60x and
+September 1.42x the values first cached, both at the level of the clean
+months around them (1.02-1.08x the same weeks in 2023-25). A third low
+episode was in progress (from 2026-10-19, 0.75-0.85x, while the TSO
+stream stayed normal). Lined up, the three episodes share one mechanism:
+NL actual load from roughly the last 28 days before a fetch is published
+20-35% low and corrected afterwards. The June 30 revision pins the
+boundary: values were final from 13:45 UTC, 28 days before the 14:24 UTC
+fetch. The "month-aligned" pattern was an artefact of when the data was
+fetched. The fetch cache treats months older than 30 days as immutable,
+so it would never have picked up the revision; only a deliberate refetch
+found it. July and September are now unmasked (kept as history under
+`[[resolved]]` in the exclusions config), the open window is excluded,
+and the serving layer refuses any origin whose lookback touches the last
+29 days of data (Phase 4). Phase 2 and 3 numbers are unaffected: the
+backtest ends in May 2026 and its inputs were verified unchanged on the
+revised data; both holdouts stay spent.
+
 ## Known limitations (deliberate, documented)
 
 - Weather history is ERA5 reanalysis (what the weather *was*); in
@@ -271,9 +392,10 @@ re-verification before a daily-retraining system may ingest them.
   Randstad-heavy; CBS population data would make them rigorous.
 - The static lower load bound cannot catch a night-time sag to a few
   hundred MW; spike and flatline checks are the backstop.
-- ENTSO-E actuals for July and September 2026 are corrupted upstream
-  (see second finding); the September defect has not yet been traced
-  to raw XML.
+- ENTSO-E NL actual load is provisional for ~28 days after publication
+  (see second finding). Re-verification is a deliberate refetch: the
+  fetch cache treats months older than 30 days as immutable, so
+  revisions are not picked up automatically.
 - Open-Meteo's archive API lags ~5 days behind real time, leaving
   recent hours without weather; production needs a fallback to the
   forecast endpoint. The weather cache also never refreshes on its own.
@@ -294,19 +416,23 @@ re-verification before a daily-retraining system may ingest them.
     |   |-- features/    # Calendar features, feature-table build
     |   |-- models/      # Splits, metrics, baselines, SARIMAX, LightGBM,
     |   |                # quantile models, conformal calibration, trust
-    |   |                # flag, backtest harness, holdout evaluation
-    |   |-- api/         # (Phase 4) FastAPI forecast endpoint
-    |   |-- monitoring/  # (Phase 4) Drift detection, quality tracking
+    |   |                # flag, backtest harness, holdout evaluation,
+    |   |                # serving-artifact export
+    |   |-- serving/     # Artifact loading + integrity checks, gated forecaster
+    |   |-- api/         # FastAPI app: /health, /model, /origins, /forecast
+    |   |-- monitoring/  # (Phase 5) Drift detection, quality tracking
     |   |-- build.py     # One-command raw -> clean -> features pipeline
     |-- data/            # Raw & processed data (gitignored, reproducible)
+    |-- models/          # Frozen serving artifacts (gitignored; hashed manifest)
     |-- notebooks/       # Exploration & diagnosis only - logic lives in src/
     |-- reports/         # Evaluation reports (phase2/, phase3/)
-    |-- tests/           # 99 unit tests, no network required
-    |-- configs/         # Data exclusions, pinned evaluation windows
+    |-- tests/           # 132 tests, no network required
+    |-- configs/         # Data exclusions, evaluation windows, serving cutoff + gates
+    |-- Dockerfile       # Serving image (multi-stage, non-root, healthcheck)
 
 ## Testing
 
-`uv run pytest` - 99 unit tests, no network required. Highlights: DST
+`uv run pytest` - 132 tests, no network required. Highlights: DST
 boundary behaviour on both switch days; rolling-origin folds proven
 non-overlapping and midnight-aligned; Fourier regressors tested for
 actual periodicity (which caught a timestamp-resolution bug that gave
@@ -319,7 +445,12 @@ property (its minimizer is the tau-quantile) checked numerically; the
 interval score / pinball identity; rearrangement never increasing the
 loss, row by row; a perturb-the-future test proving conformal
 calibration never reads later folds; and an exclusion-soundness test run
-against the real design-matrix builder.
+against the real design-matrix builder. Phase 4 adds: a training-cutoff
+canary (corrupting every input from the cutoff on leaves trained models
+bit-identical); a serving canary (load from the origin on cannot reach
+the forecast); every serving gate tested at its boundary; tamper
+detection on model files; and parity between the served forecast and
+the export's reference (skipped when the local artifact is absent).
 
 ## Setup
 
@@ -333,6 +464,10 @@ against the real design-matrix builder.
     cp .env.example .env   # add your free ENTSO-E API key
     uv run python -m gridcast.build --years 3
 
+    # Serving (Phase 4)
+    uv run python -m gridcast.models.export_artifact   # freeze the artifact (~20 min)
+    uv run uvicorn gridcast.api.app:app --port 8000     # or docker build/run, see Phase 4
+
 ## Roadmap
 
 1. ~~Data pipeline: ENTSO-E client, quality checks, cleaning, calendar +
@@ -342,9 +477,11 @@ against the real design-matrix builder.
    holdout~~ (done)
 3. ~~Probabilistic forecasts: LightGBM quantile regression, conformal
    calibration, failure analysis, trust flag, sealed holdout~~ (done)
-4. Serving: FastAPI + Docker, scheduled retraining, drift monitoring,
+4. ~~Serving: frozen artifact export, gated forecaster, FastAPI, Docker~~
+   (done)
+5. Monitoring & retraining: drift detection, scheduled retraining,
    Streamlit dashboard
-5. LLM-generated daily forecast commentary
+6. LLM-generated daily forecast commentary
 
 ## Tech stack
 
