@@ -27,7 +27,7 @@ VAL_SPAN = pd.Timedelta("60D")
 
 LGBM_PARAMS: dict = {
     "objective": "l1",  # optimize MAE: robust, and it's our headline metric
-    "num_leaves": 63,  # moderate interaction depth (hour x dow x temp)
+    "num_leaves": 2,  # moderate interaction depth (hour x dow x temp)
     "learning_rate": 0.05,  # slow, with many rounds + early stopping
     "n_estimators": 2000,  # ceiling; early stopping picks the real count
     "min_child_samples": 40,  # don't memorize rare hours
