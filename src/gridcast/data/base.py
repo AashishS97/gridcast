@@ -7,13 +7,13 @@ rest of the pipeline never knows which concrete source it's talking to.
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Protocol
 
 import pandas as pd
 
 
-class LoadKind(str, Enum):
+class LoadKind(StrEnum):
     """Which load series we're fetching."""
 
     ACTUAL = "actual"  # measured system load (processType A16)
