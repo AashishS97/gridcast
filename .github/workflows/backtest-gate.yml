@@ -1,0 +1,41 @@
+name: Backtest gate
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gate-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SNAPSHOT_TAG: gate-data-v1
+  SNAPSHOT_FILE: gate_features_v1.parquet
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Download pinned data snapshot
+        run: >-
+          curl -fsSL --create-dirs -o "gate-data/${SNAPSHOT_FILE}"
+          "https://github.com/${{ github.repository }}/releases/download/${SNAPSHOT_TAG}/${SNAPSHOT_FILE}"
+      - name: Run regression gate
+        run: >-
+          uv run --frozen python -m gridcast.models.regression_gate
+          --features "gate-data/${SNAPSHOT_FILE}"
+          --out gate-current.json
+          --baseline configs/gate_baseline.json
+      - name: Show result JSON
+        if: always()
+        run: cat gate-current.json

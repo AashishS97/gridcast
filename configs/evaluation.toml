@@ -24,3 +24,11 @@ first_origin = "2026-08-16T00:00:00Z"
 last_origin = "2026-08-30T00:00:00Z"
 status = "spent"  # scored once 2026-09-30 -> data/backtests/holdout_phase3.parquet
 note = "15 clean origins between the July and September exclusions (336h lookback). Scored exactly once, at the end of Phase 3. Confirmation, not headline."
+
+[ci_gate]
+# Regression gate for pull requests (gridcast.models.regression_gate).
+# Every stride-th dev fold: 5D step x stride 10 = 50 days apart, and
+# 50 mod 7 = 1, so the 14 folds cover each weekday twice.
+stride = 10
+expected_folds = 14
+max_rel_increase = 0.02
