@@ -7,9 +7,9 @@ target day is final. Scores are of the served, conformally calibrated forecast.
 
 ## Latest run
 
-- run at: 2026-11-20 09:10 UTC, status `ok`
+- run at: 2026-11-20 14:55 UTC, status `ok`
 - artifact: `lgbm_quantile_2026-10-01`
-- data vintage: 2026-11-20 07:00 UTC (provisional from 2026-10-22 07:00)
+- data vintage: 2026-11-20 13:00 UTC (provisional from 2026-10-22 13:00)
 - servable origins: 22, newest 2026-10-22
 - this run: 0 new forecast(s), 0 new score(s)
 
@@ -23,7 +23,9 @@ target day is final. Scores are of the served, conformally calibrated forecast.
 | 80% interval coverage | 82.7% (target 80%) |
 | mean interval width (MW) | 882 |
 
-Reference: the calibration pool (2026-08-02 to 2026-09-30, out-of-sample, not a sealed holdout) had p50 MAE 246.6 MW.
+These are the served (calibrated) quantiles. For comparisons with the backtest
+and calibration-pool baselines (which are raw, pre-calibration), rolling windows
+with uncertainty bands, and the per-hour breakdown, see ACCURACY.md.
 
 Every origin weighs equally (24 hours each). A few dozen origins is a small
 sample: read coverage with a margin of several points.
