@@ -44,6 +44,8 @@ change is a different case and goes through the backtest gate first.
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
 import tomllib
 from dataclasses import dataclass, field
@@ -262,16 +264,25 @@ def compare(
     def zone(cov: np.ndarray) -> str:
         boot = cov[idx].mean(axis=1)
         return coverage_zone(
-            cov.mean(), band(boot, acc.amber_level), band(boot, acc.red_level),
+            cov.mean(),
+            band(boot, acc.amber_level),
+            band(boot, acc.red_level),
             acc.nominal_coverage,
-        )  # fmt: skip
+        )
 
     cov_b = b.loc[common, "coverage"].to_numpy()
     cz, champ_z = zone(cov_b), zone(a.loc[common, "coverage"].to_numpy())
     out = Comparison(
-        "wait", n, float(rel), rel_band, float(pa.mean()), float(pb.mean()), float(cov_b.mean()),
-        cz, champ_z,
-    )  # fmt: skip
+        "wait",
+        n,
+        float(rel),
+        rel_band,
+        float(pa.mean()),
+        float(pb.mean()),
+        float(cov_b.mean()),
+        cz,
+        champ_z,
+    )
 
     if rel_band[0] > 0:
         out.decision, out.reason = "reject", "challenger worse: whole band above 0"
@@ -293,28 +304,93 @@ def compare(
     return out
 
 
-def main() -> int:
-    """Print today's trigger decision from a log directory (zones.csv,
-    drift.csv, vintages.csv). Exit 0 always: deciding is not failing."""
-    ap = argparse.ArgumentParser(description="retraining trigger decision")
-    ap.add_argument("--log-dir", type=Path, required=True)
-    args = ap.parse_args()
-    v = read_log(args.log_dir / "vintages.csv", VINTAGE_COLS)
+CHALLENGER_FILE = "challenger.json"
+
+
+def read_challenger(log_dir: Path) -> dict | None:
+    path = log_dir / CHALLENGER_FILE
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
+def register_challenger(log_dir: Path, cutoff: pd.Timestamp, tag: str, now: pd.Timestamp) -> dict:
+    """Record a new challenger on the log branch: the daily job runs its
+    trial while status is "trial"."""
+    state = {
+        "tag": tag,
+        "cutoff": cutoff.isoformat(),
+        "artifact": f"lgbm_quantile_{cutoff:%Y-%m-%d}",
+        "status": "trial",
+        "registered_at": now.isoformat(),
+        "code_sha": (os.environ.get("GITHUB_SHA") or "local")[:12],
+    }
+    (log_dir / CHALLENGER_FILE).write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    return state
+
+
+def decide(log_dir: Path, force: bool, champion_cutoff: pd.Timestamp | None = None) -> Trigger:
+    """The trigger on a log directory. A running trial blocks a new build;
+    --force supplies a reason (manual request) but never lifts a blocker."""
+    v = read_log(log_dir / "vintages.csv", VINTAGE_COLS)
     if v.empty:
-        print("no vintages logged yet")
-        return 0
-    data_as_of = v["data_as_of"].max()
-    provisional_from = data_as_of - pd.Timedelta(days=load_provisional_days())
+        raise SystemExit("no vintages logged yet: cannot place a cutoff")
+    provisional_from = v["data_as_of"].max() - pd.Timedelta(days=load_provisional_days())
 
     def csv(name: str) -> pd.DataFrame:
-        path = args.log_dir / name
+        path = log_dir / name
         return pd.read_csv(path, parse_dates=["run_at"]) if path.exists() else pd.DataFrame()
 
-    t = trigger(load_serving_config().train_cutoff, provisional_from, csv("zones.csv"),
-                csv("drift.csv"), load_config())  # fmt: skip
-    print(f"data as of {data_as_of:%Y-%m-%d %H:%M} UTC; provisional from "
-          f"{provisional_from:%Y-%m-%d %H:%M}")  # fmt: skip
+    champion = (
+        champion_cutoff if champion_cutoff is not None else load_serving_config().train_cutoff
+    )
+    t = trigger(
+        champion,
+        provisional_from,
+        csv("zones.csv"),
+        csv("drift.csv"),
+        load_config(),
+    )
+    if force:
+        t.reasons.append("manual: forced from workflow_dispatch")
+    state = read_challenger(log_dir)
+    if state and state.get("status") == "trial":
+        t.blockers.append(f"trial in progress: {state['tag']}")
+    t.build = bool(t.reasons) and not t.blockers
+    return t
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="retraining decisions")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    d = sub.add_parser("decide", help="should a challenger be built now?")
+    d.add_argument("--log-dir", type=Path, required=True)
+    d.add_argument("--force", action="store_true")
+    d.add_argument(
+        "--github-output",
+        action="store_true",
+        help="also write build= and cutoff= to $GITHUB_OUTPUT",
+    )
+    r = sub.add_parser("register", help="record a published challenger")
+    r.add_argument("--log-dir", type=Path, required=True)
+    r.add_argument("--cutoff", required=True)
+    r.add_argument("--tag", required=True)
+    args = ap.parse_args()
+
+    if args.cmd == "register":
+        state = register_challenger(
+            args.log_dir,
+            pd.Timestamp(args.cutoff, tz="UTC"),
+            args.tag,
+            pd.Timestamp.now(tz="UTC").floor("s"),
+        )
+        print(json.dumps(state, indent=2))
+        return 0
+
+    t = decide(args.log_dir, args.force)
     print(t.summary())
+    if args.github_output:
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+            f.write(f"build={'true' if t.build else 'false'}\n")
+            f.write(f"cutoff={t.candidate_cutoff:%Y-%m-%d}\n")
     return 0
 
 

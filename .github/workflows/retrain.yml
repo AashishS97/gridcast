@@ -1,0 +1,123 @@
+name: Retrain challenger
+
+# After each daily shadow run, decide whether to build a challenger
+# (gridcast.monitoring.retraining: schedule, performance and concept-drift
+# triggers; red data checks and a running trial block). If yes: fresh data,
+# export at today's provisional line, static checks, publish the bundle as a
+# PRERELEASE and register the trial on the log branch. Nothing here touches
+# serving: promotion is a separate, human-approved change.
+on:
+  workflow_run:
+    workflows: ["Daily shadow forecast"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Build even without a trigger (blockers still apply)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: retrain
+  cancel-in-progress: false
+
+env:
+  LOG_BRANCH: forecast-log
+
+jobs:
+  decide:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion != 'cancelled' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      build: ${{ steps.decide.outputs.build == 'true' && steps.released.outputs.exists != 'true' }}
+      cutoff: ${{ steps.decide.outputs.cutoff }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Fetch the log
+        run: |
+          git fetch --depth 1 origin "${LOG_BRANCH}"
+          git worktree add log FETCH_HEAD
+      - name: Decide
+        id: decide
+        env:
+          FORCE: ${{ inputs.force }}
+        run: |
+          args="decide --log-dir log --github-output"
+          if [ "${FORCE}" = "true" ]; then args="${args} --force"; fi
+          uv run --frozen python -m gridcast.monitoring.retraining ${args}
+      - name: Already released?
+        id: released
+        if: ${{ steps.decide.outputs.build == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CUTOFF: ${{ steps.decide.outputs.cutoff }}
+        run: |
+          if gh release view "serving-${CUTOFF}" > /dev/null 2>&1; then
+            echo "serving-${CUTOFF} exists already: releases are immutable, not rebuilding"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: decide
+    if: ${{ needs.decide.outputs.build == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      CUTOFF: ${{ needs.decide.outputs.cutoff }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Fetch fresh data and rebuild features
+        env:
+          ENTSOE_API_KEY: ${{ secrets.ENTSOE_API_KEY }}
+        run: uv run --frozen python -m gridcast.build --years 3
+      - name: Export the challenger
+        run: uv run --frozen python -m gridcast.models.export_artifact --cutoff "${CUTOFF}"
+      - name: Check and bundle
+        id: bundle
+        run: |
+          uv run --frozen python -m gridcast.models.candidate --cutoff "${CUTOFF}" --out dist | tee candidate.txt
+          grep -E '^(tag|bundle)=' candidate.txt >> "$GITHUB_OUTPUT"
+      - name: Publish as a prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.bundle.outputs.tag }}
+          BUNDLE: ${{ steps.bundle.outputs.bundle }}
+        run: |
+          {
+            echo "Challenger trained to ${CUTOFF} (commit ${GITHUB_SHA::12}). Prerelease: in its"
+            echo "paired trial against the champion, not serving."
+            echo
+            echo '```'
+            cat candidate.txt
+            echo '```'
+          } > notes.md
+          gh release create "${TAG}" "${BUNDLE}" --prerelease --title "Challenger ${CUTOFF}" --notes-file notes.md
+      - name: Register the trial on the log branch
+        env:
+          TAG: ${{ steps.bundle.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "${LOG_BRANCH}"
+          git worktree add log FETCH_HEAD
+          uv run --frozen python -m gridcast.monitoring.retraining register --log-dir log --cutoff "${CUTOFF}" --tag "${TAG}"
+          cd log
+          git add challenger.json
+          git commit -m "challenger: ${TAG}"
+          git push origin "HEAD:${LOG_BRANCH}"

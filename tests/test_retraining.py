@@ -43,15 +43,35 @@ def drift(days: int, median_zone="green", data_zone="green", start="2026-11-01")
     rows = []
     for t in pd.date_range(utc(start) + pd.Timedelta("7h"), periods=days, freq="D"):
         rows += [
-            {"run_at": t, "family": "concept", "check": "median_error", "subject": "raw p50",
-             "zone": median_zone},
-            {"run_at": t, "family": "concept", "check": "tail_rate", "subject": "below p10",
-             "zone": "green"},
-            {"run_at": t, "family": "data", "check": "late_revision", "subject": "load",
-             "zone": data_zone},
-            {"run_at": t, "family": "feature", "check": "shift", "subject": "temperature_2m",
-             "zone": "amber"},
-        ]  # fmt: skip
+            {
+                "run_at": t,
+                "family": "concept",
+                "check": "median_error",
+                "subject": "raw p50",
+                "zone": median_zone,
+            },
+            {
+                "run_at": t,
+                "family": "concept",
+                "check": "tail_rate",
+                "subject": "below p10",
+                "zone": "green",
+            },
+            {
+                "run_at": t,
+                "family": "data",
+                "check": "late_revision",
+                "subject": "load",
+                "zone": data_zone,
+            },
+            {
+                "run_at": t,
+                "family": "feature",
+                "check": "shift",
+                "subject": "temperature_2m",
+                "zone": "amber",
+            },
+        ]
     return pd.DataFrame(rows)
 
 
@@ -87,8 +107,13 @@ def test_manual_reruns_do_not_count_as_extra_days():
 
 
 def test_red_data_check_and_too_little_new_data_block():
-    t = trigger(CHAMP, utc("2026-11-05"), zones(1, coverage_zone="red_under"),
-                drift(1, data_zone="red"), CFG)  # fmt: skip
+    t = trigger(
+        CHAMP,
+        utc("2026-11-05"),
+        zones(1, coverage_zone="red_under"),
+        drift(1, data_zone="red"),
+        CFG,
+    )
     assert not t.build and t.reasons and "late_revision" in t.blockers[0]
     t = trigger(CHAMP, utc("2026-10-04"), zones(1, coverage_zone="red_under"), drift(1), CFG)
     assert not t.build and "only 3 new final day(s)" in t.blockers[0]
@@ -147,3 +172,33 @@ def test_undecided_trial_ends_at_max_paired_with_the_tie_rule():
     end = compare(champ, noisy, utc("2026-10-01"), CFG, ACC)
     assert end.n_paired == 28 and end.decision in {"promote", "reject"}
     assert end.decision == ("promote" if end.rel_diff <= 0 else "reject")
+
+
+def test_decide_force_and_trial_in_progress(tmp_path):
+    from gridcast.monitoring.retraining import decide, read_challenger, register_challenger
+    from gridcast.serving.daily_log import VINTAGE_COLS, write_log
+
+    as_of = utc("2026-11-20 14:00")
+    v = pd.DataFrame(
+        [
+            {
+                "run_at": as_of,
+                "data_as_of": as_of,
+                "day": utc("2026-11-19"),
+                "load_hours": 24,
+                "load_mean_mw": 13000.0,
+                "temp_mean_c": 8.0,
+            }
+        ],
+        columns=VINTAGE_COLS,
+    )
+    write_log(v, tmp_path / "vintages.csv")
+    quiet = decide(tmp_path, force=False, champion_cutoff=CHAMP)
+    assert not quiet.build and quiet.candidate_cutoff == utc("2026-10-22")
+    forced = decide(tmp_path, force=True, champion_cutoff=CHAMP)
+    assert forced.build and forced.reasons == ["manual: forced from workflow_dispatch"]
+
+    register_challenger(tmp_path, utc("2026-10-22"), "serving-2026-10-22", as_of)
+    assert read_challenger(tmp_path)["status"] == "trial"
+    again = decide(tmp_path, force=True, champion_cutoff=CHAMP)
+    assert not again.build and again.blockers == ["trial in progress: serving-2026-10-22"]

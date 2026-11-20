@@ -76,3 +76,14 @@ max_paired = 28
 # non-inferiority margin on mean pinball loss, the same 2% the backtest gate
 # allows a pull request
 margin = 0.02
+
+# Static checks on a freshly exported challenger, before its trial
+# (read by gridcast.models.candidate). Sanity bounds, not quality claims: the
+# paired trial decides quality. They catch a broken export or broken data.
+[candidate]
+# raw 80% coverage of the calibration pool; every pool and backtest so far
+# was 64-66%
+pool_coverage_min = 0.50
+pool_coverage_max = 0.90
+# pool q50 MAE at most this multiple of the backtest gate's dev-fold MAE
+pool_mae_max_ratio = 1.30

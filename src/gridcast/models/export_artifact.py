@@ -24,11 +24,21 @@ forecast traces back to exactly what produced it. The directory is written
 as <name>.partial and renamed only when complete, so a crashed export never
 leaves a half-written artifact that looks valid.
 
+The training data must be final: the cutoff may not lie after the
+provisional line of the feature table (newest load minus provisional_days,
+configs/serving_gates.toml). Otherwise the last weeks of training and the
+calibration pool would be ENTSO-E's provisional, 20-35%-low values.
+
 Run:  uv run python -m gridcast.models.export_artifact
+      uv run python -m gridcast.models.export_artifact --cutoff 2026-10-22
+      (--cutoff builds a challenger at another cutoff without editing
+      serving.toml; serving.toml names the champion)
 """
 
 from __future__ import annotations
 
+import argparse
+import dataclasses
 import hashlib
 import json
 import platform
@@ -52,7 +62,7 @@ from gridcast.models.exclusions import (
     contaminated_origins,
     load_exclusions,
 )
-from gridcast.models.lgbm import LGBM_PARAMS, VAL_SPAN
+from gridcast.models.lgbm import VAL_SPAN
 from gridcast.models.metrics import DEFAULT_QUANTILES, rearrange
 from gridcast.models.ml_features import (
     N_HORIZONS,
@@ -65,6 +75,7 @@ from gridcast.models.quantile_lgbm import (
     NAMES,
     fit_predict_fold_quantiles,
     fit_quantile_models,
+    quantile_params,
 )
 from gridcast.models.trust import COLD_PCT, FLAG_COLS, SHIFT_FRAC, trust_flags
 
@@ -252,8 +263,33 @@ def _git_state() -> dict:
     }
 
 
-def main() -> None:
+def parse_cutoff(text: str) -> pd.Timestamp:
+    """A date or timestamp, read as UTC; must be midnight (an origin)."""
+    ts = pd.Timestamp(text)
+    ts = ts.tz_localize("UTC") if ts.tz is None else ts.tz_convert("UTC")
+    if ts != ts.floor("D"):
+        raise ValueError(f"cutoff {ts} must be midnight UTC")
+    return ts
+
+
+def check_final(cutoff: pd.Timestamp, load_ts: pd.DatetimeIndex, provisional_days: int) -> None:
+    """Refuse a cutoff whose training data would still be provisional."""
+    data_as_of = load_ts.max()
+    line = data_as_of - pd.Timedelta(days=provisional_days)
+    if cutoff > line:
+        raise SystemExit(
+            f"cutoff {cutoff} is after the provisional line {line} (data as of {data_as_of}, "
+            f"{provisional_days} provisional days): training data would not be final"
+        )
+
+
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(description="freeze a serving artifact")
+    ap.add_argument("--cutoff", help="override train_cutoff (YYYY-MM-DD, midnight UTC)")
+    args = ap.parse_args(argv)
     cfg = load_config()
+    if args.cutoff:
+        cfg = dataclasses.replace(cfg, train_cutoff=parse_cutoff(args.cutoff))
     cutoff = cfg.train_cutoff
     out_dir = cfg.output_root / cfg.name
     if out_dir.exists():
@@ -265,6 +301,11 @@ def main() -> None:
     exclusions = load_exclusions()
     raw = pd.read_parquet(FEATURES_PATH)
     ts = pd.DatetimeIndex(raw["timestamp"])
+    load_ts = ts[np.asarray(raw[TARGET_COL].notna())]
+    from gridcast.serving.forecaster import load_provisional_days  # serving imports this module
+
+    provisional_days = load_provisional_days()
+    check_final(cutoff, load_ts, provisional_days)
     ref_end = cutoff + (N_HORIZONS - 1) * HOUR
     if ts.max() < ref_end:
         raise SystemExit(f"feature table ends {ts.max()}, before reference day end {ref_end}")
@@ -339,7 +380,10 @@ def main() -> None:
         "features": feats,
         "dropped_features": list(DROP_FEATURES),
         "training": {
-            "params": LGBM_PARAMS,
+            # per model: the shared base params with objective="quantile" and
+            # alpha=tau, as trained (until 2026-10-01 this recorded the base
+            # params alone, which showed objective "l1")
+            "params": {n: quantile_params(DEFAULT_QUANTILES[n]) for n in NAMES},
             "first_origin": train["origin"].min().isoformat(),
             "last_origin": train["origin"].max().isoformat(),
             "n_rows": len(train),
@@ -363,6 +407,8 @@ def main() -> None:
         "inputs": {
             "features_sha256": _sha256(Path(FEATURES_PATH)),
             "features_last_timestamp": ts.max().isoformat(),
+            "data_as_of": load_ts.max().isoformat(),
+            "provisional_days": provisional_days,
             "exclusions_sha256": _sha256(Path(EXCLUSIONS_PATH)),
             "serving_config_sha256": _sha256(CONFIG_PATH),
         },
