@@ -1,4 +1,4 @@
-﻿# Periods where ENTSO-E NL actual load is known-bad.
+# Periods where ENTSO-E NL actual load is known-bad.
 # Applied at model-load time by gridcast.models.exclusions: load_mw is
 # MASKED to NaN (hourly grid kept intact), features.parquet is never edited.
 # All times UTC. Only [[exclusion]] tables are applied. [[resolved]] tables
@@ -12,10 +12,15 @@
 # 14:24 UTC. The TSO day-ahead stream is not affected.
 # Evidence: notebooks/phase4_recheck_entsoe.py, notebooks/phase4_vintage_diff.py.
 
-[[exclusion]]
+# No open exclusions: from 2026-11-20 the moving provisional window is
+# handled by the serving gate (configs/serving_gates.toml, provisional_days).
+# Add an [[exclusion]] only for a defect that the gate cannot cover.
+
+[[resolved]]
 start = "2026-10-17T00:00:00Z"
-reason = "Provisional publication window: NL actual load ~0.75-0.85x same-week 2023-25 levels from 2026-10-19, while actual/TSO falls to 0.95 (normal ~1.15-1.25). Estimated boundary 2026-10-18 ~14:00 UTC (28 days before the 2026-11-15 fetch), padded ~1 day. Open-ended: close after a refetch shows it revised."
+reason = "Provisional publication window: NL actual load ~0.75-0.85x same-week 2023-25 levels from 2026-10-19, while actual/TSO falls to 0.95 (normal ~1.15-1.25). Estimated boundary 2026-10-18 ~14:00 UTC (28 days before the 2026-11-15 fetch), padded ~1 day."
 evidence = "phase4_recheck_entsoe.py and phase3_data_state.py, run 2026-11-15: YoY LOW runs 2026-10-19 -> 2026-11-15 (median 0.76-0.83)"
+resolution = "Revised upstream on schedule, verified 2026-11-20 with phase4_recheck_entsoe.py: 451 of 2976 cached October quarter-hours changed (mean new/old 1.053 over the month); the LOW run now starts 2026-10-23, 28 days before the fetch (2026-11-20 05:45 UTC), and weekly YoY through 2026-10-25 is 1.03-1.04. Fourth episode of the same mechanism. Closed rather than moved forward: the 29-day provisional gate covers the remaining window automatically."
 
 [[resolved]]
 start = "2026-06-30T00:00:00Z"
