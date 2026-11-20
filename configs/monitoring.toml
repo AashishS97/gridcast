@@ -52,3 +52,27 @@ level_ratio_red = 0.85
 # the weather archive lags ~6 days; amber when the newest day with
 # temperature is older than this
 weather_lag_amber_days = 10
+
+# Retraining: when to build a challenger, and when it may replace the
+# champion (read by gridcast.monitoring.retraining).
+[retraining]
+# SCHEDULE: build when the champion has not seen this many days of final
+# data (its cutoff to today's provisional line). The backtest retrained daily,
+# so every day past that is a day of staleness the backtest never measured
+max_unseen_days = 28
+# below this, a refresh would add too little new data to be worth a trial
+min_new_days = 7
+# PERFORMANCE / CONCEPT DRIFT: a red accuracy or concept-drift zone triggers
+# at once; an amber one only after it has held on this many distinct days
+# (one amber day is noise at these sample sizes)
+persistent_amber_days = 7
+# CHAMPION / CHALLENGER: paired comparison on the same origins, both scored
+# against the same final actuals. Decide no earlier than min_paired origins.
+min_paired = 14
+# by max_paired the trial ends: a challenger that was neither shown worse nor
+# shown non-inferior is promoted if its mean pinball is not above the champion's
+# (a tie goes to the fresher model: the refresh is the expected state)
+max_paired = 28
+# non-inferiority margin on mean pinball loss, the same 2% the backtest gate
+# allows a pull request
+margin = 0.02
