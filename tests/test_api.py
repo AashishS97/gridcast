@@ -1,6 +1,9 @@
 """HTTP layer on the synthetic artifact: routes, response contract, refusal
 mapping, input validation, and fail-fast startup."""
 
+import json
+import logging
+
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
@@ -90,3 +93,36 @@ def test_broken_artifact_stops_startup():
 
     with pytest.raises(ArtifactError), TestClient(create_app(broken)):
         pass
+
+
+class _Capture(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__()
+        self.lines: list[dict] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.lines.append(json.loads(record.getMessage()))
+
+
+@pytest.fixture
+def access_lines():
+    cap = _Capture()
+    logger = logging.getLogger("gridcast.access")
+    logger.addHandler(cap)
+    yield cap.lines
+    logger.removeHandler(cap)
+
+
+def test_access_log_one_json_line_per_request(client, access_lines):
+    c, _ = client
+    c.get("/forecast", params={"origin": "2024-10-10T00:00:00Z"})
+    c.get("/forecast", params={"origin": "2024-10-10T06:00:00Z"})
+    c.get("/health")  # liveness probe: not logged
+    assert len(access_lines) == 2
+    ok, refused = access_lines
+    assert (ok["path"], ok["status"], ok["refusal"]) == ("/forecast", 200, None)
+    assert ok["origin"] == "2024-10-10T00:00:00Z"
+    assert ok["artifact"] == "synthetic"
+    assert ok["ms"] >= 0
+    assert (refused["status"], refused["refusal"]) == (422, "not_midnight_utc")
+    assert not any("client" in k or "ip" in k for k in ok)  # no client addresses

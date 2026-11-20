@@ -6,7 +6,16 @@ import pandas as pd
 import pytest
 
 from gridcast.models.exclusions import Exclusion
-from gridcast.serving.daily_log import FORECAST_COLS, read_log, run, score_origin
+from gridcast.serving.daily_log import (
+    FORECAST_COLS,
+    INPUT_KEYS,
+    RUN_COLS,
+    VINTAGE_COLS,
+    VINTAGE_DAYS,
+    read_log,
+    run,
+    score_origin,
+)
 from gridcast.serving.forecaster import Forecaster, load_artifact
 
 
@@ -99,3 +108,37 @@ def test_stale_data_fails_the_run_but_still_logs_it(artifact, synthetic_frame, t
     assert run(fc, tmp_path, utc("2024-11-15")) == 1
     runs = pd.read_csv(tmp_path / "runs.csv")
     assert runs["status"].iloc[-1].startswith("stale_data")
+
+
+def test_inputs_and_vintages_are_logged(artifact, synthetic_frame, tmp_path):
+    fc = make(artifact, synthetic_frame, provisional_days=10)
+    run(fc, tmp_path, utc("2024-10-27 06:00"))
+    x = read_log(tmp_path / "inputs.csv", INPUT_KEYS, extra_ok=True)
+    assert list(x.columns) == INPUT_KEYS + [f for f in artifact.features if f != "horizon"]
+    assert len(x) == 24 * len(fc.servable_origins())
+    # what was logged is what the boosters predicted from
+    origin = utc("2024-10-10")
+    logged = x[x["origin"] == origin].sort_values("horizon")
+    _, used = fc.forecast_with_inputs(origin)
+    np.testing.assert_allclose(logged[artifact.features], used[artifact.features], rtol=1e-12)
+
+    run(fc, tmp_path, utc("2024-10-28 06:00"))
+    v = read_log(tmp_path / "vintages.csv", VINTAGE_COLS)
+    assert len(v) == 2 * VINTAGE_DAYS  # one ledger per run, even with unchanged data
+    assert v.groupby("run_at")["day"].max().eq(utc("2024-10-26")).all()
+    assert len(read_log(tmp_path / "inputs.csv", INPUT_KEYS, extra_ok=True)) == len(x)
+
+
+def test_runs_log_from_before_code_sha_still_reads(artifact, synthetic_frame, tmp_path):
+    old = (
+        "run_at,artifact,data_as_of,provisional_from,n_servable,last_servable,"
+        "new_forecasts,new_scores,status\n"
+        "2024-10-20T06:00:00Z,synthetic,2024-10-19T23:00:00Z,2024-10-09T23:00:00Z,"
+        "9,2024-10-09T00:00:00Z,9,0,ok\n"
+    )
+    (tmp_path / "runs.csv").write_text(old, encoding="utf-8")
+    run(make(artifact, synthetic_frame, provisional_days=10), tmp_path, utc("2024-10-27 06:00"))
+    runs = read_log(tmp_path / "runs.csv", RUN_COLS)
+    assert len(runs) == 2
+    assert pd.isna(runs["code_sha"].iloc[0])
+    assert runs["code_sha"].iloc[1] == "local"

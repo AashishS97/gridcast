@@ -136,3 +136,32 @@ def test_servable_origins(artifact, synthetic_frame):
         pd.date_range("2024-10-18", "2024-10-26", freq="1D", tz="UTC")
     )
     assert list(servable) == list(expected)
+
+
+def test_logged_inputs_reproduce_the_forecast(artifact, synthetic_frame):
+    fc = make(artifact, synthetic_frame)
+    out, x = fc.forecast_with_inputs(utc("2024-10-10"))
+    others = [f for f in artifact.features if f != "horizon"]
+    assert list(x.columns) == ["origin", "timestamp", "horizon", *others]
+    assert x["horizon"].tolist() == list(range(1, 25))
+    for n in NAMES:  # the boosters on the logged rows give the logged raw quantiles
+        np.testing.assert_array_equal(
+            artifact.boosters[n].predict(x[artifact.features]), out[f"{n}_raw"]
+        )
+    pd.testing.assert_frame_equal(out, fc.forecast(utc("2024-10-10")))
+
+
+def test_inputs_are_gated_like_forecasts(artifact, synthetic_frame):
+    with pytest.raises(NotServable):
+        make(artifact, synthetic_frame).forecast_with_inputs(utc("2024-09-30"))
+
+
+def test_daily_ledger_records_the_published_series(artifact, synthetic_frame):
+    # drop half of the last day: the ledger must show 12 hours, not hide it
+    cut = synthetic_frame[synthetic_frame["timestamp"] < utc("2024-10-26 12:00")]
+    led = make(artifact, cut).daily_ledger(5)
+    assert led["day"].tolist() == list(pd.date_range("2024-10-22", "2024-10-26", tz="UTC"))
+    assert led["load_hours"].tolist() == [24, 24, 24, 24, 12]
+    day = cut.set_index("timestamp").loc[utc("2024-10-24") : utc("2024-10-24 23:00")]
+    assert led["load_mean_mw"].iloc[2] == pytest.approx(day["load_mw"].mean())
+    assert led["temp_mean_c"].iloc[2] == pytest.approx(day["temperature_2m"].mean())

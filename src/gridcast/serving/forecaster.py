@@ -217,6 +217,13 @@ class Forecaster:
     def forecast(self, origin: str | pd.Timestamp) -> pd.DataFrame:
         """24 rows: raw, rearranged and calibrated quantiles, the conformal
         shifts, trust flags. Raises NotServable if a gate fails."""
+        return self.forecast_with_inputs(origin)[0]
+
+    def forecast_with_inputs(self, origin: str | pd.Timestamp) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """The forecast plus the exact feature rows the boosters predicted from
+        (origin, timestamp, horizon, then the artifact's other features in
+        model order). One computation, so the logged inputs cannot differ from the
+        ones used."""
         problem = self.check(origin)
         if problem is not None:
             raise NotServable(*problem)
@@ -242,7 +249,11 @@ class Forecaster:
             out[n] = q[:, j]
             out[f"{n}_cal"] = cal[:, j]
             out[f"shift_{n}"] = a.shifts[n]
-        return trust_flags(out, self._raw, self.exclusions)
+        inputs = out[["origin", "timestamp", "horizon"]].copy()
+        for f in a.features:  # horizon is itself a feature: equal values, kept once
+            if f not in inputs.columns:
+                inputs[f] = rows[f].to_numpy()
+        return trust_flags(out, self._raw, self.exclusions), inputs
 
     def final_actuals(self, origin: str | pd.Timestamp) -> np.ndarray | None:
         """Observed load for the origin's 24 target hours, or None while any of
@@ -261,6 +272,31 @@ class Forecaster:
         if np.isnan(values).any():
             return None
         return values
+
+    def daily_ledger(self, days: int) -> pd.DataFrame:
+        """What the upstream has published for the last `days` UTC calendar days
+        up to the data vintage: hours of actual load present, their mean, and
+        the mean temperature. Raw, exclusions NOT applied -- this records the
+        source, not what the model may use. Logged every run, it is the only
+        record of how a past day's published value changed between vintages."""
+        if days < 1:
+            raise ValueError("days must be >= 1")
+        last = self.data_as_of.floor("D")
+        days_idx = pd.date_range(last - pd.Timedelta(days=days - 1), last, freq="1D")
+        lo, hi = days_idx[0], last + pd.Timedelta("1D")
+        load = self._load[(self._load.index >= lo) & (self._load.index < hi)]
+        temp = self._weather["temperature_2m"]
+        temp = temp[(temp.index >= lo) & (temp.index < hi)]
+        load_by_day = load.groupby(load.index.floor("D"))
+        temp_by_day = temp.groupby(temp.index.floor("D"))
+        return pd.DataFrame(
+            {
+                "day": days_idx,
+                "load_hours": load_by_day.count().reindex(days_idx, fill_value=0).to_numpy(int),
+                "load_mean_mw": load_by_day.mean().reindex(days_idx).to_numpy(),
+                "temp_mean_c": temp_by_day.mean().reindex(days_idx).to_numpy(),
+            }
+        )
 
     def servable_origins(self) -> pd.DatetimeIndex:
         """Every origin from the cutoff to the end of the data that passes all gates."""

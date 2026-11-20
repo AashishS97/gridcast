@@ -18,12 +18,23 @@ with a stable gate code (before_cutoff, provisional_data, ...).
 The forecaster loads once at startup; a missing or modified artifact stops
 the process from starting rather than failing every request later.
 
+Access log: one JSON line per request on stdout (logger "gridcast.access"),
+replacing uvicorn's plain access line (run uvicorn with --no-access-log):
+time, method, path, origin, status, refusal code, duration. /health is not
+logged (liveness probes are noise); client addresses are never logged. On
+Render free this is an operational record only: retention is 7 days and the
+disk is ephemeral, so nothing downstream depends on it.
+
 Run:  uv run uvicorn gridcast.api.app:app --port 8000   (docs at /docs)
 """
 
 from __future__ import annotations
 
+import json
+import logging
+import sys
 import threading
+import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -37,6 +48,18 @@ from pydantic import AwareDatetime, BaseModel
 from gridcast.serving.forecaster import Forecaster, NotServable, from_config
 
 TZ = "Europe/Amsterdam"
+NOT_LOGGED = {"/health"}
+access_log = logging.getLogger("gridcast.access")
+
+
+def _configure_access_log() -> None:
+    """Message-only lines to stdout, independent of uvicorn's logging config."""
+    if not access_log.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        access_log.addHandler(handler)
+    access_log.setLevel(logging.INFO)
+    access_log.propagate = False
 
 
 class HourForecast(BaseModel):
@@ -67,6 +90,7 @@ class Refusal(BaseModel):
 
 def create_app(factory: Callable[[], Forecaster] = from_config) -> FastAPI:
     lock = threading.Lock()
+    _configure_access_log()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -83,8 +107,33 @@ def create_app(factory: Callable[[], Forecaster] = from_config) -> FastAPI:
     def get_forecaster(request: Request) -> Forecaster:
         return request.app.state.forecaster
 
+    @app.middleware("http")
+    async def log_request(request: Request, call_next):
+        if request.url.path in NOT_LOGGED:
+            return await call_next(request)
+        start = time.perf_counter()
+        status = 500  # stays 500 if the handler raises
+        try:
+            response = await call_next(request)
+            status = response.status_code
+            return response
+        finally:
+            fc = getattr(request.app.state, "forecaster", None)
+            record = {
+                "ts": pd.Timestamp.now(tz="UTC").isoformat(timespec="milliseconds"),
+                "method": request.method,
+                "path": request.url.path,
+                "origin": request.query_params.get("origin"),
+                "status": status,
+                "refusal": getattr(request.state, "refusal", None),
+                "ms": round((time.perf_counter() - start) * 1000, 1),
+                "artifact": fc.artifact.name if fc is not None else None,
+            }
+            access_log.info(json.dumps(record))
+
     @app.exception_handler(NotServable)
     async def refused(request: Request, exc: NotServable) -> JSONResponse:
+        request.state.refusal = exc.code  # read by the access log
         return JSONResponse(status_code=422, content={"code": exc.code, "detail": exc.message})
 
     @app.get("/", include_in_schema=False)

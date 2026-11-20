@@ -14,8 +14,16 @@ The scores are of the SERVED forecast: conformally calibrated p10/p50/p90.
 
 Files in --log-dir (created on the first run, appended afterwards):
   forecasts.csv  24 rows per origin: p10/p50/p90 (MW), trust flag, provenance
+  inputs.csv     24 rows per origin: the exact feature values the boosters saw.
+                 The feature table is rebuilt from a fresh upstream pull every
+                 run, so without this a past forecast cannot be reproduced once
+                 the upstream revises; it is also the reference for feature drift
   scores.csv     one row per scored origin: MAE, pinball, 80% coverage, width
-  runs.csv       one row per run: data vintage, gate state, what changed
+  vintages.csv   per run, the last VINTAGE_DAYS calendar days as published at
+                 that run (hours present, mean load, mean temperature): the only
+                 record of when a revision arrived, which the API data cannot
+                 reconstruct after the fact
+  runs.csv       one row per run: data vintage, gate state, what changed, code
   README.md      the current state, rewritten each run
 
 Run:  uv run python -m gridcast.serving.daily_log --log-dir forecast-log
@@ -26,6 +34,7 @@ logged, so the failure is visible in runs.csv as well as in CI).
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -45,27 +54,42 @@ SCORE_COLS = [
 ]  # fmt: skip
 RUN_COLS = [
     "run_at", "artifact", "data_as_of", "provisional_from", "n_servable",
-    "last_servable", "new_forecasts", "new_scores", "status",
+    "last_servable", "new_forecasts", "new_scores", "status", "code_sha",
 ]  # fmt: skip
+INPUT_KEYS = ["origin", "timestamp", "horizon", "artifact", "logged_at"]
+VINTAGE_COLS = ["run_at", "data_as_of", "day", "load_hours", "load_mean_mw", "temp_mean_c"]
+# columns added after a log file first existed: older files get them as empty
+ADDED_COLS = {"code_sha"}
 TIME_COLS = {"origin", "timestamp", "data_as_of", "logged_at", "scored_at", "run_at",
-             "provisional_from", "last_servable"}  # fmt: skip
+             "provisional_from", "last_servable", "day"}  # fmt: skip
 QUANTILES = {"p10": 0.1, "p50": 0.5, "p90": 0.9}
 ROUNDING = {
     "p10": 1, "p50": 1, "p90": 1, "mae_p50": 2, "pinball_p10": 2, "pinball_p50": 2,
     "pinball_p90": 2, "pinball_mean": 2, "coverage_80": 4, "width_mean": 1,
+    "load_mean_mw": 1, "temp_mean_c": 2,
 }  # fmt: skip
 MAX_DATA_AGE = pd.Timedelta(days=3)
+# 28 provisional days + the revision landing + margin: every day is seen both
+# before and after its expected revision
+VINTAGE_DAYS = 60
 
 
-def read_log(path: Path, columns: list[str]) -> pd.DataFrame:
+def read_log(path: Path, columns: list[str], extra_ok: bool = False) -> pd.DataFrame:
+    """Read one log file. `columns` must be present (except ADDED_COLS, which
+    older files get as empty); with extra_ok, other columns are kept too (the
+    inputs log, whose feature columns depend on the artifact)."""
     if not path.exists():
         return pd.DataFrame(columns=columns)
     df = pd.read_csv(path)
+    for col in ADDED_COLS & (set(columns) - set(df.columns)):
+        df[col] = pd.NA
     missing = set(columns) - set(df.columns)
     if missing:
         raise ValueError(f"{path} is missing columns {sorted(missing)}")
     for col in TIME_COLS & set(columns):
         df[col] = pd.to_datetime(df[col], utc=True)
+    if extra_ok:
+        return df[columns + [c for c in df.columns if c not in columns]]
     return df[columns]
 
 
@@ -86,14 +110,20 @@ def append(log: pd.DataFrame, new: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([log, new], ignore_index=True)
 
 
-def new_forecasts(fc: Forecaster, logged: pd.DataFrame, now: pd.Timestamp) -> pd.DataFrame:
-    """Forecast every servable origin not already in the log."""
+def new_forecasts(
+    fc: Forecaster, logged: pd.DataFrame, now: pd.Timestamp
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Forecast every servable origin not already in the log; return the
+    forecasts and the feature rows they were computed from."""
     done = set(pd.to_datetime(logged["origin"], utc=True)) if len(logged) else set()
-    rows = []
+    rows, inputs = [], []
     for origin in fc.servable_origins():
         if origin in done:
             continue
-        f = fc.forecast(origin)
+        f, x = fc.forecast_with_inputs(origin)
+        x.insert(3, "artifact", fc.artifact.name)
+        x.insert(4, "logged_at", now)
+        inputs.append(x)
         rows.append(
             pd.DataFrame(
                 {
@@ -111,7 +141,9 @@ def new_forecasts(fc: Forecaster, logged: pd.DataFrame, now: pd.Timestamp) -> pd
                 }
             )
         )
-    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(columns=FORECAST_COLS)
+    if not rows:
+        return pd.DataFrame(columns=FORECAST_COLS), pd.DataFrame(columns=INPUT_KEYS)
+    return pd.concat(rows, ignore_index=True), pd.concat(inputs, ignore_index=True)
 
 
 def score_origin(group: pd.DataFrame, actuals: np.ndarray) -> dict:
@@ -207,11 +239,13 @@ def summary_lines(fc: Forecaster, scores: pd.DataFrame, run: dict) -> list[str]:
 
 def run(fc: Forecaster, log_dir: Path, now: pd.Timestamp) -> int:
     log_dir.mkdir(parents=True, exist_ok=True)
-    paths = {name: log_dir / f"{name}.csv" for name in ("forecasts", "scores", "runs")}
+    names = ("forecasts", "inputs", "scores", "vintages", "runs")
+    paths = {name: log_dir / f"{name}.csv" for name in names}
 
     forecasts = read_log(paths["forecasts"], FORECAST_COLS)
-    fresh = new_forecasts(fc, forecasts, now)
+    fresh, fresh_inputs = new_forecasts(fc, forecasts, now)
     forecasts = append(forecasts, fresh)
+    inputs = append(read_log(paths["inputs"], INPUT_KEYS, extra_ok=True), fresh_inputs)
 
     scores = read_log(paths["scores"], SCORE_COLS)
     scored_now = new_scores(fc, forecasts, scores, now)
@@ -235,11 +269,19 @@ def run(fc: Forecaster, log_dir: Path, now: pd.Timestamp) -> int:
         "new_forecasts": int(fresh["origin"].nunique()) if len(fresh) else 0,
         "new_scores": len(scored_now),
         "status": status,
+        "code_sha": (os.environ.get("GITHUB_SHA") or "local")[:12],
     }
     runs = read_log(paths["runs"], RUN_COLS)
     runs = append(runs, pd.DataFrame([run_row], columns=RUN_COLS))
 
+    ledger = fc.daily_ledger(VINTAGE_DAYS)
+    ledger.insert(0, "run_at", now)
+    ledger.insert(1, "data_as_of", fc.data_as_of)
+    vintages = append(read_log(paths["vintages"], VINTAGE_COLS), ledger[VINTAGE_COLS])
+
     write_log(forecasts.sort_values(["origin", "horizon"]), paths["forecasts"])
+    write_log(inputs.sort_values(["origin", "horizon"]), paths["inputs"])
+    write_log(vintages, paths["vintages"])
     write_log(scores.sort_values("origin"), paths["scores"])
     write_log(runs, paths["runs"])
     (log_dir / "README.md").write_text(
