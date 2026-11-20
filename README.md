@@ -5,10 +5,15 @@ intervals, backtesting, drift monitoring, automated retraining, and
 LLM-generated daily forecast reports. Built on real data from the ENTSO-E
 Transparency Platform and Open-Meteo.
 
-**Status: Phase 4 (serving) complete.** Data pipeline, point and quantile
-models, calibrated prediction intervals, a trust flag, and a gated FastAPI
-service in Docker are built and tested; drift monitoring, scheduled
-retraining and the dashboard are next - see roadmap.
+**Status: Phase 5 (CI/CD and deployment) complete.** The gated forecast
+API is live at **https://gridcast-7kic.onrender.com** (free tier: the first
+request after 15 idle minutes waits ~1 minute for a cold start). Every push
+is linted and tested, every pull request is backtested against a frozen
+baseline, every green commit on `main` is deployed automatically, and a
+daily job scores the frozen model on data it has never seen
+([shadow log](https://github.com/AashishS97/gridcast/tree/forecast-log)).
+Drift detection, scheduled retraining and the dashboard are next - see
+roadmap.
 
 ## Why this project
 
@@ -54,10 +59,11 @@ flowchart LR
     end
 ```
 
-The Ingest, Features and Model stages are built, including quantile
-regression, conformal calibration and a trust flag; backtesting exists as
-offline evaluation. Serve, drift detection, the dashboard and Report are
-roadmap.
+The Ingest, Features, Model and Serve stages are built and deployed,
+including quantile regression, conformal calibration and a trust flag.
+Backtesting runs offline and, on a pinned subset of folds, as a pull-request
+gate; a daily shadow evaluation scores served forecasts once their actuals
+are final. Drift detection, the dashboard and Report are roadmap.
 
 ## What works today
 
@@ -93,6 +99,11 @@ and the Phase 4 serving layer:
 
     uv run python -m gridcast.models.export_artifact   # freeze models + conformal shifts at the configured cutoff
     uv run uvicorn gridcast.api.app:app --port 8000     # gated forecast API (or docker build/run)
+
+and the Phase 5 automation (normally run by GitHub Actions, runnable locally):
+
+    uv run python -m gridcast.models.regression_gate --out gate.json --baseline configs/gate_baseline.json
+    uv run python -m gridcast.serving.daily_log --log-dir forecast-log
 
 ## Results (Phase 2)
 
@@ -268,6 +279,108 @@ service answers 17 origins, 2026-10-01 to 10-17.
   imports (statsmodels, polars).
 - No authentication or rate limiting; one worker.
 
+## Phase 5: CI/CD and deployment
+
+Live: **https://gridcast-7kic.onrender.com** (redirects to the interactive
+docs; try `/health` or `/forecast?origin=2026-10-05T00:00:00Z`).
+
+```mermaid
+flowchart LR
+    PR[Pull request] --> L1[ruff + pytest]
+    PR --> G[Backtest gate<br/>14 pinned folds]
+    M[Push to main] --> L2[ruff + pytest]
+    L2 --> B[Build image<br/>model + data from release]
+    B --> S[Smoke test<br/>512 MB cap]
+    S --> R[(GHCR)]
+    R --> D[Render deploy hook<br/>exact commit sha]
+    C[Daily 07:17 UTC] --> F[Fresh ENTSO-E +<br/>Open-Meteo pull]
+    F --> X[Forecast newly servable origins<br/>score final ones]
+    X --> LOG[(forecast-log branch)]
+```
+
+| Workflow | Trigger | What it proves |
+|---|---|---|
+| `ci.yml`: lint, test | every push | the code is formatted, lint-clean and passes 148 tests on a clean Linux runner |
+| `backtest-gate.yml` | every pull request | the change did not make the forecasts worse |
+| `ci.yml`: image | green push to `main` | the image builds, starts and forecasts under the host's memory limit, then deploys |
+| `daily.yml` | daily schedule | the frozen model still performs on data it never saw |
+
+**Why evaluation runs in CI.** Unit tests check that code does what it was
+written to do; they cannot see a change that makes forecasts worse. A
+deliberately weakened model (`num_leaves` 63 -> 2) passes all 148 tests and
+raises mean pinball loss by 23.2%. The gate
+(`gridcast.models.regression_gate`) re-runs the quantile backtest on every
+10th pinned dev fold - 14 folds, 50 days apart, so every weekday is covered
+twice - against a frozen data snapshot (release `gate-data-v1`, sha256
+recorded in `configs/gate_baseline.json`) and fails the pull request if
+mean pinball loss rises more than 2%. It calls the backtest's own training
+function and reproduces the Phase 3 numbers on those folds exactly
+(difference 0.000000 on all eight metrics); Windows with 24 threads and
+Linux with 2 give identical results, so run-to-run noise is zero and the
+2% is a policy choice, not a noise band. It refuses to compare runs on
+different folds or data (exit 2) rather than reporting a pass. It uses dev
+folds only: both holdouts stay spent. Changing model quality means changing
+`configs/gate_baseline.json` in the same pull request, so every shift in
+the numbers is visible in review.
+
+**Deployment.** The model and the data vintage it serves are gitignored, so
+Render cannot build the image from the repo. Instead, after lint and tests
+pass on `main`, Actions downloads the serving bundle (release
+`serving-2026-10-01`), builds the image, starts it with a 512 MB memory cap
+and requires `/health` to report the artifact's checksums verified and a
+forecast to return 200, then pushes it to GHCR tagged with the commit sha
+and calls Render's deploy hook with that exact tag. Render only switches
+traffic once `/health` answers, and `/health` only answers after the
+artifact verifies, so a broken image cannot go live. Measured at Render's
+free-tier limits (0.1 CPU, 512 MB): ~250 MB resident, startup within 60 s,
+~2.5 s per forecast.
+
+**Daily shadow evaluation.** A live day-ahead forecast is not possible with
+this data: every model input lies in the 336 h before the origin, and
+ENTSO-E publishes NL actual load ~20-35% low for ~28 days (second finding
+below). So the daily job does what can be done honestly. It rebuilds the
+feature table from a fresh pull, forecasts every newly servable origin
+(~30 days behind) with the same gated `Forecaster` the API uses, and scores
+each logged forecast only once its own 24 target hours are final - an
+origin can pass the lookback gate while its target day is still
+provisional, and scoring against those values would compare the forecast
+with numbers 20-35% low. Results are appended to the
+[`forecast-log`](https://github.com/AashishS97/gridcast/tree/forecast-log)
+branch. If the newest actual load is more than 3 days old, or nothing is
+servable, the run is still logged and the job fails.
+
+First run (2026-11-20), 21 origins scored (2026-10-01 to 10-21):
+
+| | Shadow, served (calibrated) forecast | Calibration pool, Aug-Sep 2026 |
+|---|---|---|
+| p50 MAE | 230.2 MW | 246.6 MW |
+| 80% interval coverage | 82.7% | 80% by construction |
+| mean interval width | 882 MW | |
+
+So far the frozen model and its fixed conformal shifts have held up seven
+weeks past the training cutoff. 21 origins is 504 hours; coverage can move
+several points as days are added (on 2026-10-09, 10-13 and 10-14 it fell to
+42-54%). The log's README has the current numbers.
+
+**Secrets.** Two, each given to one step only: `ENTSOE_API_KEY` to the
+daily data pull and `RENDER_DEPLOY_HOOK` to the deploy step. The API, CI
+and the gate need none, so they also run for forks. `.env` was never
+committed (checked across history) and the `.dockerignore` whitelist keeps
+it out of the image.
+
+**What this is not.**
+
+- Not a live day-ahead forecaster: the API serves a fixed data vintage and
+  the daily job runs ~30 days behind (provisional data, and weather is
+  observed, not forecast).
+- The served model is frozen at 2026-10-01; nothing retrains yet. The
+  shadow log is how ageing will show.
+- The gate checks the raw quantile model on 14 folds and gates one pooled
+  metric; a change that helps p50 and hurts p90 can pass.
+- Free tier: cold starts of ~1 minute after 15 idle minutes. GitHub
+  disables scheduled workflows after 60 days without commits.
+- Action versions are pinned to tags, not commit SHAs.
+
 ## Pipeline design
 
 - **UTC everywhere, local time only as features.** The index is tz-aware
@@ -372,6 +485,17 @@ and the serving layer refuses any origin whose lookback touches the last
 backtest ends in May 2026 and its inputs were verified unchanged on the
 revised data; both holdouts stay spent.
 
+**Update (2026-11-20): a fourth episode, predicted in advance.** Five days
+after the 2026-11-15 fetch, the low run had moved from 2026-10-19 to start
+on 2026-10-23 - 28 days before the new fetch, to the hour - and 451 of
+October's quarter-hours had been revised up to normal levels (weekly YoY
+1.03-1.04 through 2026-10-25). With the mechanism confirmed four times, the
+open exclusion was closed and the moving window is now covered by the
+29-day serving gate alone; the daily job rebuilds from a fresh pull, so it
+picks up revisions as ENTSO-E publishes them. The remaining risk - a
+revision slower than 28 days - is what the planned data-level drift check
+is for.
+
 ## Known limitations (deliberate, documented)
 
 - Weather history is ERA5 reanalysis (what the weather *was*); in
@@ -393,9 +517,10 @@ revised data; both holdouts stay spent.
 - The static lower load bound cannot catch a night-time sag to a few
   hundred MW; spike and flatline checks are the backstop.
 - ENTSO-E NL actual load is provisional for ~28 days after publication
-  (see second finding). Re-verification is a deliberate refetch: the
-  fetch cache treats months older than 30 days as immutable, so
-  revisions are not picked up automatically.
+  (see second finding). The daily job rebuilds from a fresh pull, but the
+  local fetch cache treats months older than 30 days as immutable, so a
+  local re-verification is still a deliberate refetch. Nothing checks
+  automatically that revisions keep arriving on schedule.
 - Open-Meteo's archive API lags ~5 days behind real time, leaving
   recent hours without weather; production needs a fallback to the
   forecast endpoint. The weather cache also never refreshes on its own.
@@ -417,8 +542,9 @@ revised data; both holdouts stay spent.
     |   |-- models/      # Splits, metrics, baselines, SARIMAX, LightGBM,
     |   |                # quantile models, conformal calibration, trust
     |   |                # flag, backtest harness, holdout evaluation,
-    |   |                # serving-artifact export
-    |   |-- serving/     # Artifact loading + integrity checks, gated forecaster
+    |   |                # serving-artifact export, CI regression gate
+    |   |-- serving/     # Artifact loading + integrity checks, gated forecaster,
+    |   |                # daily shadow log
     |   |-- api/         # FastAPI app: /health, /model, /origins, /forecast
     |   |-- monitoring/  # (Phase 5) Drift detection, quality tracking
     |   |-- build.py     # One-command raw -> clean -> features pipeline
@@ -426,13 +552,17 @@ revised data; both holdouts stay spent.
     |-- models/          # Frozen serving artifacts (gitignored; hashed manifest)
     |-- notebooks/       # Exploration & diagnosis only - logic lives in src/
     |-- reports/         # Evaluation reports (phase2/, phase3/)
-    |-- tests/           # 132 tests, no network required
+    |-- tests/           # 148 tests, no network required
     |-- configs/         # Data exclusions, evaluation windows, serving cutoff + gates
     |-- Dockerfile       # Serving image (multi-stage, non-root, healthcheck)
+    |-- .github/workflows/
+    |   |-- ci.yml             # lint + test on push; image build, smoke test, deploy on main
+    |   |-- backtest-gate.yml  # regression gate on pull requests
+    |   |-- daily.yml          # daily shadow forecast + scoring
 
 ## Testing
 
-`uv run pytest` - 132 tests, no network required. Highlights: DST
+`uv run pytest` - 148 tests, no network required. Highlights: DST
 boundary behaviour on both switch days; rolling-origin folds proven
 non-overlapping and midnight-aligned; Fourier regressors tested for
 actual periodicity (which caught a timestamp-resolution bug that gave
@@ -451,6 +581,12 @@ bit-identical); a serving canary (load from the origin on cannot reach
 the forecast); every serving gate tested at its boundary; tamper
 detection on model files; and parity between the served forecast and
 the export's reference (skipped when the local artifact is absent).
+Phase 5 adds: the gate's fold subset is checked to be pinned folds covering
+every weekday, and a better number on different folds or data must be
+refused, not passed; the daily log scores a forecast only once its whole
+target day is final and outside every exclusion, appends each origin
+exactly once across re-runs, picks up newly final days on a later vintage,
+and fails (while still logging) on stale data; `/` redirects to the docs.
 
 ## Setup
 
@@ -479,13 +615,16 @@ the export's reference (skipped when the local artifact is absent).
    calibration, failure analysis, trust flag, sealed holdout~~ (done)
 4. ~~Serving: frozen artifact export, gated forecaster, FastAPI, Docker~~
    (done)
-5. Monitoring & retraining: drift detection, scheduled retraining,
+5. ~~CI/CD and deployment: lint and test on every push, backtest gate on
+   pull requests, automatic deploy to Render, daily shadow evaluation~~
+   (done)
+6. Monitoring & retraining: drift detection, scheduled retraining,
    Streamlit dashboard
-6. LLM-generated daily forecast commentary
+7. LLM-generated daily forecast commentary
 
 ## Tech stack
 
 Python 3.11, uv, pandas, LightGBM, statsmodels, FastAPI, Docker,
-GitHub Actions, pytest, Streamlit. Data: ENTSO-E Transparency
+GitHub Actions, GitHub Container Registry, Render, pytest, Streamlit. Data: ENTSO-E Transparency
 Platform, Open-Meteo (ERA5). Anthropic/OpenAI API for forecast
 commentary only.
