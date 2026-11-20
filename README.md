@@ -7,9 +7,9 @@ target day is final. Scores are of the served, conformally calibrated forecast.
 
 ## Latest run
 
-- run at: 2026-11-20 15:35 UTC, status `ok`
+- run at: 2026-11-20 16:26 UTC, status `ok`
 - artifact: `lgbm_quantile_2026-10-01`
-- data vintage: 2026-11-20 13:00 UTC (provisional from 2026-10-22 13:00)
+- data vintage: 2026-11-20 14:00 UTC (provisional from 2026-10-22 14:00)
 - servable origins: 22, newest 2026-10-22
 - this run: 0 new forecast(s), 0 new score(s)
 
