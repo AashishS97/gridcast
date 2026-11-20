@@ -36,3 +36,52 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen
       - run: uv run --frozen pytest -q
+
+  image:
+    needs: [lint, test]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    env:
+      BUNDLE_TAG: serving-2026-10-01
+      BUNDLE_FILE: serving_bundle_2026-10-01.tar.gz
+      IMAGE: ghcr.io/aashishs97/gridcast
+    steps:
+      - uses: actions/checkout@v5
+      - name: Download and unpack serving bundle
+        run: |
+          curl -fsSL -o bundle.tar.gz "https://github.com/${{ github.repository }}/releases/download/${BUNDLE_TAG}/${BUNDLE_FILE}"
+          tar -xzf bundle.tar.gz
+          rm bundle.tar.gz
+      - name: Build image
+        run: >-
+          docker build
+          --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}"
+          --label "org.opencontainers.image.revision=${{ github.sha }}"
+          -t "${IMAGE}:${{ github.sha }}"
+          -t "${IMAGE}:latest"
+          .
+      - name: Smoke test under the host's memory limit
+        run: |
+          docker run -d --name smoke --memory=512m --memory-swap=512m -p 8000:8000 "${IMAGE}:${{ github.sha }}"
+          ok=0
+          for i in $(seq 1 60); do
+            if curl -fs http://localhost:8000/health -o health.json; then ok=1; break; fi
+            sleep 2
+          done
+          docker logs --tail 20 smoke
+          test "$ok" = 1
+          cat health.json
+          python3 -c "import json, sys; h = json.load(open('health.json')); sys.exit(0 if h['status'] == 'ok' and h['data_matches_artifact'] else 1)"
+          origin=$(python3 -c "import json; print(json.load(open('health.json'))['first_servable'].replace('+00:00', 'Z'))")
+          curl -fsS "http://localhost:8000/forecast?origin=${origin}" -o forecast.json
+          docker inspect smoke --format 'OOMKilled={{.State.OOMKilled}} Status={{.State.Status}}'
+      - name: Log in to GHCR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "${GH_TOKEN}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Push image
+        run: docker push --all-tags "${IMAGE}"
