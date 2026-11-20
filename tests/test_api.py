@@ -26,6 +26,13 @@ def test_health(client):
     assert body["n_servable"] == 26
 
 
+def test_root_redirects_to_docs(client):
+    c, _ = client
+    r = c.get("/", follow_redirects=False)
+    assert r.status_code == 307
+    assert r.headers["location"] == "/docs"
+
+
 def test_model_returns_manifest(client):
     c, fc = client
     assert c.get("/model").json() == fc.artifact.manifest

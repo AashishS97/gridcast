@@ -31,7 +31,7 @@ from typing import Annotated
 
 import pandas as pd
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import AwareDatetime, BaseModel
 
 from gridcast.serving.forecaster import Forecaster, NotServable, from_config
@@ -86,6 +86,10 @@ def create_app(factory: Callable[[], Forecaster] = from_config) -> FastAPI:
     @app.exception_handler(NotServable)
     async def refused(request: Request, exc: NotServable) -> JSONResponse:
         return JSONResponse(status_code=422, content={"code": exc.code, "detail": exc.message})
+
+    @app.get("/", include_in_schema=False)
+    def root() -> RedirectResponse:
+        return RedirectResponse(url="/docs")
 
     @app.get("/health")
     def health(request: Request) -> dict:
