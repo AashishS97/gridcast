@@ -1,0 +1,63 @@
+name: Daily shadow forecast
+
+on:
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-shadow
+  cancel-in-progress: false
+
+env:
+  BUNDLE_TAG: serving-2026-10-01
+  BUNDLE_FILE: serving_bundle_2026-10-01.tar.gz
+  LOG_BRANCH: forecast-log
+
+jobs:
+  shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Download the frozen model (not its data)
+        run: |
+          curl -fsSL -o bundle.tar.gz "https://github.com/${{ github.repository }}/releases/download/${BUNDLE_TAG}/${BUNDLE_FILE}"
+          tar -xzf bundle.tar.gz models/
+          rm bundle.tar.gz
+      - name: Fetch fresh data and rebuild features
+        env:
+          ENTSOE_API_KEY: ${{ secrets.ENTSOE_API_KEY }}
+        run: uv run --frozen python -m gridcast.build --years 3
+      - name: Check out the log branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin "${LOG_BRANCH}" > /dev/null; then
+            git fetch origin "${LOG_BRANCH}"
+            git worktree add log FETCH_HEAD
+          else
+            git worktree add --orphan -b "${LOG_BRANCH}" log
+          fi
+      - name: Forecast, score, log
+        id: daily
+        run: uv run --frozen python -m gridcast.serving.daily_log --log-dir log
+      - name: Commit and push the log
+        if: ${{ !cancelled() && steps.daily.outcome != 'skipped' }}
+        run: |
+          cd log
+          git add -A
+          if git diff --cached --quiet; then
+            echo "log unchanged"
+          else
+            git commit -m "daily: $(date -u +%Y-%m-%d)"
+            git push origin "HEAD:${LOG_BRANCH}"
+          fi

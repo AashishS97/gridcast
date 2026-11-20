@@ -244,6 +244,24 @@ class Forecaster:
             out[f"shift_{n}"] = a.shifts[n]
         return trust_flags(out, self._raw, self.exclusions)
 
+    def final_actuals(self, origin: str | pd.Timestamp) -> np.ndarray | None:
+        """Observed load for the origin's 24 target hours, or None while any of
+        them is provisional, excluded or missing. Scoring waits for this: the
+        lookback gate alone lets an origin be served while its own target day
+        is still provisional, and scoring against those values would compare
+        the forecast with numbers published 20-35% low."""
+        o = pd.Timestamp(origin).tz_convert("UTC")
+        end = o + N_HORIZONS * HOUR
+        if end > self.provisional_from:
+            return None
+        for ex in self.exclusions:
+            if ex.start < end and (ex.end is None or o < ex.end):
+                return None
+        values = self._load.reindex(pd.date_range(o, periods=N_HORIZONS, freq="h")).to_numpy()
+        if np.isnan(values).any():
+            return None
+        return values
+
     def servable_origins(self) -> pd.DatetimeIndex:
         """Every origin from the cutoff to the end of the data that passes all gates."""
         start = self.artifact.train_cutoff
