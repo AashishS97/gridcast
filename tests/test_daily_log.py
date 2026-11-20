@@ -8,6 +8,7 @@ import pytest
 from gridcast.models.exclusions import Exclusion
 from gridcast.serving.daily_log import (
     FORECAST_COLS,
+    HOURLY_COLS,
     INPUT_KEYS,
     RUN_COLS,
     VINTAGE_COLS,
@@ -151,3 +152,40 @@ def test_code_sha_comes_from_github_sha(artifact, synthetic_frame, tmp_path, mon
     monkeypatch.setenv("GITHUB_SHA", "0123456789abcdef0123")
     run(make(artifact, synthetic_frame, provisional_days=10), tmp_path, utc("2024-10-27 06:00"))
     assert read_log(tmp_path / "runs.csv", RUN_COLS)["code_sha"].iloc[-1] == "0123456789ab"
+
+
+def test_hourly_log_matches_scores_and_recovers_raw(artifact, synthetic_frame, tmp_path):
+    fc = make(artifact, synthetic_frame, provisional_days=10)
+    run(fc, tmp_path, utc("2024-10-27 06:00"))
+    h = read_log(tmp_path / "hourly.csv", HOURLY_COLS)
+    scores = pd.read_csv(tmp_path / "scores.csv")
+    assert h["origin"].nunique() == len(scores) and len(h) == 24 * len(scores)
+    # per-day MAE from the hourly rows equals the scored MAE
+    mae = (h["y"] - h["p50"]).abs().groupby(h["origin"]).mean().round(2).to_numpy()
+    # (hourly values are stored to 0.1 MW, so the two agree to within 0.05 MW)
+    np.testing.assert_allclose(mae, scores["mae_p50"].to_numpy(), atol=0.06)
+    # raw quantiles are logged at forecast time and survive into hourly
+    _, _ = fc.forecast_with_inputs(utc("2024-10-10"))
+    ref = fc.forecast(utc("2024-10-10"))
+    day = h[h["origin"] == utc("2024-10-10")].sort_values("horizon")
+    np.testing.assert_allclose(day["p50_raw"], ref["q50"], atol=0.05)
+    # naive = load one week earlier
+    load = synthetic_frame.set_index("timestamp")["load_mw"]
+    np.testing.assert_allclose(
+        day["naive_168"], load.reindex(day["timestamp"] - pd.Timedelta("168h")), atol=0.05
+    )
+    run(fc, tmp_path, utc("2024-10-28 06:00"))
+    assert len(read_log(tmp_path / "hourly.csv", HOURLY_COLS)) == len(h)  # no duplicates
+
+
+def test_raw_recovered_for_rows_logged_before_raw_columns(artifact, synthetic_frame, tmp_path):
+    fc = make(artifact, synthetic_frame, provisional_days=10)
+    run(fc, tmp_path, utc("2024-10-20 06:00"))  # forecasts logged, few scored
+    f = pd.read_csv(tmp_path / "forecasts.csv").drop(columns=["p10_raw", "p50_raw", "p90_raw"])
+    f.to_csv(tmp_path / "forecasts.csv", index=False)  # as written by the Phase 5 code
+    for name in ("scores", "hourly"):
+        (tmp_path / f"{name}.csv").unlink()
+    run(fc, tmp_path, utc("2024-10-27 06:00"))
+    h = read_log(tmp_path / "hourly.csv", HOURLY_COLS)
+    assert h["p50_raw"].notna().all()
+    np.testing.assert_allclose(h["p50"] - h["p50_raw"], artifact.shifts["q50"], atol=0.11)

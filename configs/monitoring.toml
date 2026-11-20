@@ -1,0 +1,21 @@
+# Ongoing-monitoring thresholds (read by gridcast.monitoring.accuracy).
+# Documented here, in version control, so a change of threshold is a reviewed
+# commit, not an edit to code.
+[accuracy]
+# trailing window of scored origins: 28 = four whole weeks, so every weekday
+# weighs equally (load differs strongly between weekdays and weekends)
+window_origins = 28
+# below this the window is reported but not zoned: too few days for a band
+min_origins = 14
+# uncertainty bands: bootstrap that resamples whole DAYS (origins), because
+# the 24 hours of one forecast share one weather situation and one model state
+# and fail together; resampling hours would pretend they are independent
+n_boot = 10000
+seed = 20261120
+nominal_coverage = 0.80
+# zones, after the Basel traffic-light test for VaR backtesting: green while
+# the data are consistent with the nominal level, amber when the evidence
+# against it passes the first level, red past the second. Basel's red level
+# is 99.99%; with ~28 days a bootstrap cannot resolve such a tail, so 99.9%.
+amber_level = 0.95
+red_level = 0.999

@@ -298,6 +298,11 @@ class Forecaster:
             }
         )
 
+    def actual_load(self, timestamps: pd.DatetimeIndex) -> np.ndarray:
+        """Published actual load at the given timestamps (NaN where absent).
+        Raw: exclusions are not applied."""
+        return self._load.reindex(pd.DatetimeIndex(timestamps)).to_numpy(dtype=float)
+
     def servable_origins(self) -> pd.DatetimeIndex:
         """Every origin from the cutoff to the end of the data that passes all gates."""
         start = self.artifact.train_cutoff

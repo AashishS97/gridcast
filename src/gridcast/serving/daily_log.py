@@ -19,6 +19,10 @@ Files in --log-dir (created on the first run, appended afterwards):
                  run, so without this a past forecast cannot be reproduced once
                  the upstream revises; it is also the reference for feature drift
   scores.csv     one row per scored origin: MAE, pinball, 80% coverage, width
+  hourly.csv     24 rows per scored origin: the final actual, the served and the
+                 raw (pre-calibration) quantiles, and the seasonal-naive value
+                 (load one week earlier). The per-hour detail behind scores.csv,
+                 read by gridcast.monitoring.accuracy
   vintages.csv   per run, the last VINTAGE_DAYS calendar days as published at
                  that run (hours present, mean load, mean temperature): the only
                  record of when a revision arrived, which the API data cannot
@@ -47,6 +51,11 @@ from gridcast.serving.forecaster import Forecaster, from_config
 FORECAST_COLS = [
     "origin", "timestamp", "horizon", "p10", "p50", "p90",
     "trust_low", "trust_reasons", "artifact", "data_as_of", "logged_at",
+    "p10_raw", "p50_raw", "p90_raw",
+]  # fmt: skip
+HOURLY_COLS = [
+    "origin", "timestamp", "horizon", "y", "p10", "p50", "p90",
+    "p10_raw", "p50_raw", "p90_raw", "naive_168", "artifact", "scored_at",
 ]  # fmt: skip
 SCORE_COLS = [
     "origin", "n_hours", "mae_p50", "pinball_p10", "pinball_p50", "pinball_p90",
@@ -59,14 +68,16 @@ RUN_COLS = [
 INPUT_KEYS = ["origin", "timestamp", "horizon", "artifact", "logged_at"]
 VINTAGE_COLS = ["run_at", "data_as_of", "day", "load_hours", "load_mean_mw", "temp_mean_c"]
 # columns added after a log file first existed: older files get them as empty
-ADDED_COLS = {"code_sha"}
+ADDED_COLS = {"code_sha", "p10_raw", "p50_raw", "p90_raw"}
 TIME_COLS = {"origin", "timestamp", "data_as_of", "logged_at", "scored_at", "run_at",
-             "provisional_from", "last_servable", "day"}  # fmt: skip
+             "provisional_from", "last_servable", "day", "window_first",
+             "window_last"}  # fmt: skip
 QUANTILES = {"p10": 0.1, "p50": 0.5, "p90": 0.9}
 ROUNDING = {
     "p10": 1, "p50": 1, "p90": 1, "mae_p50": 2, "pinball_p10": 2, "pinball_p50": 2,
     "pinball_p90": 2, "pinball_mean": 2, "coverage_80": 4, "width_mean": 1,
-    "load_mean_mw": 1, "temp_mean_c": 2,
+    "load_mean_mw": 1, "temp_mean_c": 2, "p10_raw": 1, "p50_raw": 1, "p90_raw": 1,
+    "y": 1, "naive_168": 1,
 }  # fmt: skip
 MAX_DATA_AGE = pd.Timedelta(days=3)
 # 28 provisional days + the revision landing + margin: every day is seen both
@@ -82,7 +93,7 @@ def read_log(path: Path, columns: list[str], extra_ok: bool = False) -> pd.DataF
         return pd.DataFrame(columns=columns)
     df = pd.read_csv(path)
     for col in ADDED_COLS & (set(columns) - set(df.columns)):
-        df[col] = pd.NA
+        df[col] = np.nan
     missing = set(columns) - set(df.columns)
     if missing:
         raise ValueError(f"{path} is missing columns {sorted(missing)}")
@@ -133,6 +144,9 @@ def new_forecasts(
                     "p10": f["q10_cal"],
                     "p50": f["q50_cal"],
                     "p90": f["q90_cal"],
+                    "p10_raw": f["q10"],
+                    "p50_raw": f["q50"],
+                    "p90_raw": f["q90"],
                     "trust_low": f["trust_low"].astype(bool),
                     "trust_reasons": f["trust_reasons"],
                     "artifact": fc.artifact.name,
@@ -186,8 +200,62 @@ def new_scores(
     return pd.DataFrame(rows, columns=SCORE_COLS)
 
 
+def raw_quantiles(group: pd.DataFrame, fc: Forecaster) -> dict[str, np.ndarray]:
+    """Pre-calibration quantiles for one logged origin. Logged since Phase 6;
+    for older rows of the CURRENT artifact they are recovered exactly as
+    served minus shift (the shifts increase with tau, so the rearrangement
+    after shifting is a no-op). Rows of another artifact: unknown, NaN."""
+    out = {}
+    for name in QUANTILES:
+        logged = group[f"{name}_raw"].to_numpy(dtype=float)
+        if not np.isnan(logged).any():
+            out[name] = logged
+        elif (group["artifact"] == fc.artifact.name).all():
+            shift = fc.artifact.shifts[name.replace("p", "q")]
+            out[name] = group[name].to_numpy(dtype=float) - shift
+        else:
+            out[name] = np.full(len(group), np.nan)
+    return out
+
+
+def new_hourly(
+    fc: Forecaster,
+    forecasts: pd.DataFrame,
+    scores: pd.DataFrame,
+    hourly: pd.DataFrame,
+    now: pd.Timestamp,
+) -> pd.DataFrame:
+    """Per-hour rows for every scored origin not yet in the hourly log. Uses
+    the same final actuals as scoring; origins scored before this file existed
+    are filled in on the first run (their target days are final already)."""
+    done = set(pd.to_datetime(hourly["origin"], utc=True)) if len(hourly) else set()
+    rows = []
+    for origin in sorted(set(pd.to_datetime(scores["origin"], utc=True)) - done):
+        g = forecasts[forecasts["origin"] == origin].sort_values("horizon")
+        actuals = fc.final_actuals(origin)
+        if len(g) != 24 or actuals is None:
+            continue
+        ts = pd.DatetimeIndex(g["timestamp"])
+        raw = raw_quantiles(g, fc)
+        rows.append(
+            pd.DataFrame(
+                {
+                    "origin": origin,
+                    "timestamp": ts,
+                    "horizon": g["horizon"].to_numpy(int),
+                    "y": actuals,
+                    **{n: g[n].to_numpy(dtype=float) for n in QUANTILES},
+                    **{f"{n}_raw": raw[n] for n in QUANTILES},
+                    "naive_168": fc.actual_load(ts - pd.Timedelta(hours=168)),
+                    "artifact": g["artifact"].to_numpy(),
+                    "scored_at": now,
+                }
+            )
+        )
+    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(columns=HOURLY_COLS)
+
+
 def summary_lines(fc: Forecaster, scores: pd.DataFrame, run: dict) -> list[str]:
-    cal = fc.artifact.manifest.get("calibration", {})
     lines = [
         "# GridCast daily shadow log",
         "",
@@ -222,13 +290,12 @@ def summary_lines(fc: Forecaster, scores: pd.DataFrame, run: dict) -> list[str]:
     }
     lines += ["| metric | value |", "|---|---|"]
     lines += [f"| {k} | {v} |" for k, v in pooled.items()]
-    if "pool_q50_mae_mw" in cal:
-        lines += [
-            "",
-            f"Reference: the calibration pool ({cal.get('first_origin', '')[:10]} to "
-            f"{cal.get('last_origin', '')[:10]}, out-of-sample, not a sealed holdout) had "
-            f"p50 MAE {cal['pool_q50_mae_mw']:,.1f} MW.",
-        ]
+    lines += [
+        "",
+        "These are the served (calibrated) quantiles. For comparisons with the backtest",
+        "and calibration-pool baselines (which are raw, pre-calibration), rolling windows",
+        "with uncertainty bands, and the per-hour breakdown, see ACCURACY.md.",
+    ]
     lines += [
         "",
         "Every origin weighs equally (24 hours each). A few dozen origins is a small",
@@ -239,7 +306,7 @@ def summary_lines(fc: Forecaster, scores: pd.DataFrame, run: dict) -> list[str]:
 
 def run(fc: Forecaster, log_dir: Path, now: pd.Timestamp) -> int:
     log_dir.mkdir(parents=True, exist_ok=True)
-    names = ("forecasts", "inputs", "scores", "vintages", "runs")
+    names = ("forecasts", "inputs", "scores", "hourly", "vintages", "runs")
     paths = {name: log_dir / f"{name}.csv" for name in names}
 
     forecasts = read_log(paths["forecasts"], FORECAST_COLS)
@@ -250,6 +317,8 @@ def run(fc: Forecaster, log_dir: Path, now: pd.Timestamp) -> int:
     scores = read_log(paths["scores"], SCORE_COLS)
     scored_now = new_scores(fc, forecasts, scores, now)
     scores = append(scores, scored_now)
+    hourly = read_log(paths["hourly"], HOURLY_COLS)
+    hourly = append(hourly, new_hourly(fc, forecasts, scores, hourly, now))
 
     servable = fc.servable_origins()
     problems = []
@@ -283,6 +352,7 @@ def run(fc: Forecaster, log_dir: Path, now: pd.Timestamp) -> int:
     write_log(inputs.sort_values(["origin", "horizon"]), paths["inputs"])
     write_log(vintages, paths["vintages"])
     write_log(scores.sort_values("origin"), paths["scores"])
+    write_log(hourly.sort_values(["origin", "horizon"]), paths["hourly"])
     write_log(runs, paths["runs"])
     (log_dir / "README.md").write_text(
         "\n".join(summary_lines(fc, scores, run_row)) + "\n", encoding="utf-8"

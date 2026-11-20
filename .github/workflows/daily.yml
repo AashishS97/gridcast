@@ -50,6 +50,16 @@ jobs:
       - name: Forecast, score, log
         id: daily
         run: uv run --frozen python -m gridcast.serving.daily_log --log-dir log
+      - name: Accuracy and zones
+        id: accuracy
+        if: ${{ !cancelled() && steps.daily.outcome != 'skipped' }}
+        run: |
+          set +e
+          uv run --frozen python -m gridcast.monitoring.accuracy --log-dir log
+          code=$?
+          echo "code=${code}" >> "$GITHUB_OUTPUT"
+          if [ "${code}" -eq 2 ]; then exit 0; fi
+          exit "${code}"
       - name: Commit and push the log
         if: ${{ !cancelled() && steps.daily.outcome != 'skipped' }}
         run: |
@@ -61,3 +71,8 @@ jobs:
             git commit -m "daily: $(date -u +%Y-%m-%d)"
             git push origin "HEAD:${LOG_BRANCH}"
           fi
+      - name: Escalate a red zone
+        if: ${{ !cancelled() && steps.accuracy.outputs.code == '2' }}
+        run: |
+          echo "::error title=Accuracy zone red::see ACCURACY.md and zones.csv on the ${LOG_BRANCH} branch"
+          exit 1
