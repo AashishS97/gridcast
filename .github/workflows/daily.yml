@@ -60,6 +60,16 @@ jobs:
           echo "code=${code}" >> "$GITHUB_OUTPUT"
           if [ "${code}" -eq 2 ]; then exit 0; fi
           exit "${code}"
+      - name: Drift and data checks
+        id: drift
+        if: ${{ !cancelled() && steps.daily.outcome != 'skipped' }}
+        run: |
+          set +e
+          uv run --frozen python -m gridcast.monitoring.drift --log-dir log
+          code=$?
+          echo "code=${code}" >> "$GITHUB_OUTPUT"
+          if [ "${code}" -eq 2 ]; then exit 0; fi
+          exit "${code}"
       - name: Commit and push the log
         if: ${{ !cancelled() && steps.daily.outcome != 'skipped' }}
         run: |
@@ -72,7 +82,15 @@ jobs:
             git push origin "HEAD:${LOG_BRANCH}"
           fi
       - name: Escalate a red zone
-        if: ${{ !cancelled() && steps.accuracy.outputs.code == '2' }}
+        if: ${{ !cancelled() && (steps.accuracy.outputs.code == '2' || steps.drift.outputs.code == '2') }}
+        env:
+          ACCURACY: ${{ steps.accuracy.outputs.code }}
+          DRIFT: ${{ steps.drift.outputs.code }}
         run: |
-          echo "::error title=Accuracy zone red::see ACCURACY.md and zones.csv on the ${LOG_BRANCH} branch"
+          if [ "${ACCURACY}" = "2" ]; then
+            echo "::error title=Accuracy zone red::see ACCURACY.md and zones.csv on the ${LOG_BRANCH} branch"
+          fi
+          if [ "${DRIFT}" = "2" ]; then
+            echo "::error title=Drift or data check red::see DRIFT.md and drift.csv on the ${LOG_BRANCH} branch"
+          fi
           exit 1

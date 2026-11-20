@@ -19,3 +19,36 @@ nominal_coverage = 0.80
 # is 99.99%; with ~28 days a bootstrap cannot resolve such a tail, so 99.9%.
 amber_level = 0.95
 red_level = 0.999
+
+# Feature and target drift (read by gridcast.monitoring.drift).
+[drift]
+# the recent window, compared as a whole: four weeks, like the accuracy window
+window_days = 28
+# the seasonal average for an hour pools that hour of day within +-15 days of
+# the same day of the year, over the training years
+clim_halfwidth_days = 15
+# reference windows count as "same season" if centred within +-45 days of
+# the day of the year the recent window is centred on
+season_halfwidth_days = 45
+# a window or day needs at least this share of its hours to count
+min_valid_frac = 0.85
+# green while the window's mean anomaly lies inside the central 90% of the
+# same-season reference windows. Overlapping daily windows from three years
+# hold only ~10 independent windows, so tighter tails cannot be resolved
+shift_central = 0.90
+# share of window hours outside the seasonal training range (trees predict a
+# constant there) above which the support check is amber
+support_amber = 0.05
+
+# Data checks on the vintage ledger (vintages.csv).
+[data]
+# a day's published mean load that moves by more than this between two runs
+# counts as revised (provisional under-publication is 20-35%)
+rel_tol = 0.05
+# final days just past the provisional line / older final days: red below.
+# Two neighbouring fortnights differ by a few percent with the season and
+# ~10-15% around Christmas; an unrevised provisional stretch is 20-35% low
+level_ratio_red = 0.85
+# the weather archive lags ~6 days; amber when the newest day with
+# temperature is older than this
+weather_lag_amber_days = 10
