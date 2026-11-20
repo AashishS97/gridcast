@@ -129,7 +129,10 @@ def test_inputs_and_vintages_are_logged(artifact, synthetic_frame, tmp_path):
     assert len(read_log(tmp_path / "inputs.csv", INPUT_KEYS, extra_ok=True)) == len(x)
 
 
-def test_runs_log_from_before_code_sha_still_reads(artifact, synthetic_frame, tmp_path):
+def test_runs_log_from_before_code_sha_still_reads(
+    artifact, synthetic_frame, tmp_path, monkeypatch
+):
+    monkeypatch.delenv("GITHUB_SHA", raising=False)  # Actions sets it; outside CI it is absent
     old = (
         "run_at,artifact,data_as_of,provisional_from,n_servable,last_servable,"
         "new_forecasts,new_scores,status\n"
@@ -142,3 +145,9 @@ def test_runs_log_from_before_code_sha_still_reads(artifact, synthetic_frame, tm
     assert len(runs) == 2
     assert pd.isna(runs["code_sha"].iloc[0])
     assert runs["code_sha"].iloc[1] == "local"
+
+
+def test_code_sha_comes_from_github_sha(artifact, synthetic_frame, tmp_path, monkeypatch):
+    monkeypatch.setenv("GITHUB_SHA", "0123456789abcdef0123")
+    run(make(artifact, synthetic_frame, provisional_days=10), tmp_path, utc("2024-10-27 06:00"))
+    assert read_log(tmp_path / "runs.csv", RUN_COLS)["code_sha"].iloc[-1] == "0123456789ab"
