@@ -1,2 +1,3 @@
-run_at,artifact,data_as_of,provisional_from,n_servable,last_servable,new_forecasts,new_scores,status
-2026-11-20T06:55:24Z,lgbm_quantile_2026-10-01,2026-11-20T05:00:00Z,2026-10-22T05:00:00Z,22,2026-10-22T00:00:00Z,22,21,ok
+run_at,artifact,data_as_of,provisional_from,n_servable,last_servable,new_forecasts,new_scores,status,code_sha
+2026-11-20T06:55:24Z,lgbm_quantile_2026-10-01,2026-11-20T05:00:00Z,2026-10-22T05:00:00Z,22,2026-10-22T00:00:00Z,22,21,ok,
+2026-11-20T09:10:13Z,lgbm_quantile_2026-10-01,2026-11-20T07:00:00Z,2026-10-22T07:00:00Z,22,2026-10-22T00:00:00Z,0,0,ok,5f173c24c5c2
