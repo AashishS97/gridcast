@@ -10,6 +10,9 @@ A challenger is the same recipe at a newer cutoff (export_artifact
                 reference forecast for the cutoff origin, to 1e-6 MW
   objective     every model's recorded params say objective="quantile" with
                 its own alpha (the champion's manifest said "l1")
+  recipe        training starts at DATA_START: a refresh may change the
+                cutoff and nothing else. (The first CI challenger, 2026-11-23,
+                trained from 2023-11-01 because the fetch window rolled.)
   shifts        conformal shifts strictly increase p10 < p50 < p90: the
                 monitoring recovers raw quantiles as served minus shift,
                 which is exact only then
@@ -39,6 +42,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from gridcast.data.fetch import DATA_START
 from gridcast.models.backtest import FEATURES_PATH
 from gridcast.models.exclusions import load_exclusions
 from gridcast.models.export_artifact import PROJECT_ROOT, load_config, parse_cutoff
@@ -134,6 +138,12 @@ def validate(
             if not bad
             else f"wrong or missing params for {bad}",
         )
+    )
+
+    first = m.get("training", {}).get("first_origin")
+    same_start = first is not None and pd.Timestamp(first) == DATA_START
+    out.append(
+        ("recipe", same_start, f"training starts {str(first)[:10]}, recipe {DATA_START:%Y-%m-%d}")
     )
 
     shifts = [artifact.shifts[n] for n in artifact.names]

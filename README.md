@@ -69,7 +69,7 @@ are final. Drift detection, the dashboard and Report are roadmap.
 
 One command builds a model-ready feature table from an empty data folder:
 
-    uv run python -m gridcast.build --years 3
+    uv run python -m gridcast.build
 
 This fetches ~3 years of Dutch load (actual + TSO day-ahead forecast) at
 native 15-minute resolution, caches it as monthly parquet, cleans it,
@@ -598,7 +598,7 @@ and fails (while still logging) on stale data; `/` redirects to the docs.
     cd gridcast
     uv sync
     cp .env.example .env   # add your free ENTSO-E API key
-    uv run python -m gridcast.build --years 3
+    uv run python -m gridcast.build
 
     # Serving (Phase 4)
     uv run python -m gridcast.models.export_artifact   # freeze the artifact (~20 min)

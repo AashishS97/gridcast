@@ -7,7 +7,13 @@ Months ending more than REFRESH_HORIZON_DAYS ago are immutable and skipped
 if cached; recent months are always refetched because ENTSO-E revises
 recent actuals.
 
-Run:  uv run python -m gridcast.data.fetch --years 3
+History starts at DATA_START, a fixed date: the recipe trains on an
+expanding window from there (configs/evaluation.toml train_start). Until
+2026-11-23 the start was "3 years before today", which silently moved: a
+challenger built on CI on 2026-11-23 trained from 2023-11-01 while the
+champion had trained from 2023-07-01.
+
+Run:  uv run python -m gridcast.data.fetch
 """
 
 from __future__ import annotations
@@ -29,21 +35,22 @@ logger = logging.getLogger(__name__)
 RAW_DIR = Path("data/raw/entsoe")
 REFRESH_HORIZON_DAYS = 30
 POLITE_SLEEP_S = 0.5
+DATA_START = pd.Timestamp("2023-07-01", tz="UTC")
 
 
-def month_starts(n_years: int, now: pd.Timestamp) -> pd.DatetimeIndex:
-    """First-of-month UTC timestamps covering the last n_years up to now."""
-    start = (now - pd.DateOffset(years=n_years)).normalize().replace(day=1)
-    return pd.date_range(start, now, freq="MS")
+def month_starts(start: pd.Timestamp, now: pd.Timestamp) -> pd.DatetimeIndex:
+    """First-of-month UTC timestamps from start's month up to now."""
+    first = start.tz_convert("UTC").normalize().replace(day=1)
+    return pd.date_range(first, now, freq="MS")
 
 
-def fetch_and_cache(source: LoadSource, kind: LoadKind, n_years: int) -> None:
+def fetch_and_cache(source: LoadSource, kind: LoadKind, start: pd.Timestamp = DATA_START) -> None:
     now = pd.Timestamp.now(tz="UTC")
     out_dir = RAW_DIR / kind.value
     out_dir.mkdir(parents=True, exist_ok=True)
 
     fetched = skipped = 0
-    for m_start in month_starts(n_years, now):
+    for m_start in month_starts(start, now):
         m_end = m_start + pd.DateOffset(months=1)
         path = out_dir / f"{m_start:%Y-%m}.parquet"
 
@@ -91,12 +98,11 @@ def main() -> None:
         raise SystemExit("ENTSOE_API_KEY not set — put it in .env (see .env.example)")
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--years", type=int, default=3, help="years of history to fetch")
-    args = parser.parse_args()
+    parser.parse_args()
 
     client = EntsoeClient(api_key=api_key)
     for kind in LoadKind:
-        fetch_and_cache(client, kind, n_years=args.years)
+        fetch_and_cache(client, kind)
 
     # Sanity summary — eyeball this before we build quality checks on top.
     for kind in LoadKind:

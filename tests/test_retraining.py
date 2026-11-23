@@ -202,3 +202,23 @@ def test_decide_force_and_trial_in_progress(tmp_path):
     assert read_challenger(tmp_path)["status"] == "trial"
     again = decide(tmp_path, force=True, champion_cutoff=CHAMP)
     assert not again.build and again.blockers == ["trial in progress: serving-2026-10-22"]
+
+
+def test_close_records_the_verdict_and_unblocks(tmp_path):
+    from gridcast.monitoring.retraining import (
+        close_challenger,
+        read_challenger,
+        register_challenger,
+    )
+
+    register_challenger(tmp_path, utc("2026-10-24"), "serving-2026-10-24", utc("2026-11-23 13:02"))
+    state = close_challenger(tmp_path, "rejected", "recipe deviation", utc("2026-11-23 14:00"))
+    assert (
+        state["status"] == "rejected" and read_challenger(tmp_path)["reason"] == "recipe deviation"
+    )
+    trials = pd.read_csv(tmp_path / "trials.csv")
+    assert trials[["tag", "status"]].values.tolist() == [["serving-2026-10-24", "rejected"]]
+    with pytest.raises(SystemExit, match="no trial in progress"):
+        close_challenger(tmp_path, "promoted", "again", utc("2026-11-23 15:00"))
+    with pytest.raises(ValueError):
+        close_challenger(tmp_path, "maybe", "x", utc("2026-11-23 15:00"))

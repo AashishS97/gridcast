@@ -36,7 +36,10 @@ def candidate(synthetic_artifact_dir, synthetic_frame, tmp_path):
     synthetic_frame.to_parquet(features, index=False)
     m = json.loads((art / "manifest.json").read_text(encoding="utf-8"))
     m["inputs"]["features_sha256"] = file_sha256(features)
-    m["training"] = {"params": {n: quantile_params(t) for n, t in DEFAULT_QUANTILES.items()}}
+    m["training"] = {
+        "params": {n: quantile_params(t) for n, t in DEFAULT_QUANTILES.items()},
+        "first_origin": "2023-07-01T00:00:00+00:00",
+    }
     m["calibration"].update({"pool_raw_interval_coverage": 0.64, "pool_q50_mae_mw": 250.0})
     (art / "manifest.json").write_text(json.dumps(m), encoding="utf-8")
     fc = Forecaster(load_artifact(art), synthetic_frame, [], 0, file_sha256(features))
@@ -58,7 +61,7 @@ def edit_manifest(art, fn):
 
 def test_sound_candidate_passes_everything(candidate):
     r = run(*candidate)
-    assert set(r) == {"integrity", "data", "parity", "objective", "shifts", "pool"}
+    assert set(r) == {"integrity", "data", "parity", "objective", "recipe", "shifts", "pool"}
     assert all(ok for ok, _ in r.values()), r
 
 
@@ -121,3 +124,20 @@ def test_export_refuses_a_provisional_cutoff():
     check_final(pd.Timestamp("2026-10-22", tz="UTC"), load_ts, 29)  # line 10-22 06:00
     with pytest.raises(SystemExit, match="provisional line"):
         check_final(pd.Timestamp("2026-10-23", tz="UTC"), load_ts, 29)
+
+
+def test_training_start_other_than_the_recipe_fails(candidate):
+    art, features = candidate
+    edit_manifest(art, lambda m: m["training"].update({"first_origin": "2023-11-01T00:00:00Z"}))
+    r = run(art, features)
+    assert not r["recipe"][0] and "2023-11-01" in r["recipe"][1]
+
+
+def test_data_start_is_the_recipe_train_start():
+    from gridcast.data.fetch import DATA_START, month_starts
+    from gridcast.models.evaluation import load_config as load_evaluation
+
+    assert pd.Timestamp(load_evaluation()["backtest"]["train_start"]) == DATA_START
+    months = month_starts(DATA_START, pd.Timestamp("2026-11-23 12:00", tz="UTC"))
+    assert months[0] == DATA_START and months[-1] == pd.Timestamp("2026-11-01", tz="UTC")
+    assert len(months) == 41  # Jul 2023 .. Nov 2026, independent of today's date

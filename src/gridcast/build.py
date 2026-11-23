@@ -1,6 +1,9 @@
 """Reproducible build: raw -> clean -> features -> parquet, one command.
 
-    uv run python -m gridcast.build --years 3
+    uv run python -m gridcast.build
+
+History always starts at DATA_START (gridcast.data.fetch), for load and
+weather alike.
 
 Idempotent: immutable ENTSO-E months and cached weather cities are
 skipped, so re-runs only refresh recent data. --offline rebuilds
@@ -21,7 +24,7 @@ from gridcast.data import weather
 from gridcast.data.base import LoadKind
 from gridcast.data.clean import PROCESSED_DIR, clean_series
 from gridcast.data.entsoe import EntsoeClient
-from gridcast.data.fetch import fetch_and_cache, load_raw
+from gridcast.data.fetch import DATA_START, fetch_and_cache, load_raw
 from gridcast.features.build import build_feature_table
 
 logger = logging.getLogger(__name__)
@@ -32,7 +35,6 @@ FEATURES_PATH = Path("data/processed/features.parquet")
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--years", type=int, default=3)
     parser.add_argument(
         "--offline", action="store_true", help="rebuild from raw cache, no network calls"
     )
@@ -45,12 +47,12 @@ def main() -> None:
             raise SystemExit("ENTSOE_API_KEY not set — put it in .env")
         client = EntsoeClient(api_key=api_key)
         for kind in LoadKind:
-            fetch_and_cache(client, kind, n_years=args.years)
+            fetch_and_cache(client, kind)
 
         end_date = (
             pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=weather.ARCHIVE_LAG_DAYS)
         ).strftime("%Y-%m-%d")
-        weather.fetch_all("2023-07-01", end_date)
+        weather.fetch_all(f"{DATA_START:%Y-%m-%d}", end_date)
 
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     hourly = {}

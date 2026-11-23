@@ -85,7 +85,7 @@ jobs:
       - name: Fetch fresh data and rebuild features
         env:
           ENTSOE_API_KEY: ${{ secrets.ENTSOE_API_KEY }}
-        run: uv run --frozen python -m gridcast.build --years 3
+        run: uv run --frozen python -m gridcast.build
       - name: Export the challenger
         run: uv run --frozen python -m gridcast.models.export_artifact --cutoff "${CUTOFF}"
       - name: Check and bundle

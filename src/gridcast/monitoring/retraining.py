@@ -327,6 +327,27 @@ def register_challenger(log_dir: Path, cutoff: pd.Timestamp, tag: str, now: pd.T
     return state
 
 
+TRIALS_FILE = "trials.csv"
+TRIAL_COLS = ["tag", "cutoff", "registered_at", "closed_at", "status", "reason"]
+
+
+def close_challenger(log_dir: Path, status: str, reason: str, now: pd.Timestamp) -> dict:
+    """End the running trial: challenger.json keeps the verdict, and the
+    trial is appended to trials.csv (the retraining history)."""
+    if status not in {"promoted", "rejected"}:
+        raise ValueError("status must be promoted or rejected")
+    state = read_challenger(log_dir)
+    if not state or state.get("status") != "trial":
+        raise SystemExit("no trial in progress")
+    state.update({"status": status, "closed_at": now.isoformat(), "reason": reason})
+    (log_dir / CHALLENGER_FILE).write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    path = log_dir / TRIALS_FILE
+    old = pd.read_csv(path) if path.exists() else pd.DataFrame(columns=TRIAL_COLS)
+    row = pd.DataFrame([{c: state.get(c, "") for c in TRIAL_COLS}], columns=TRIAL_COLS)
+    pd.concat([old, row], ignore_index=True).to_csv(path, index=False)
+    return state
+
+
 def decide(log_dir: Path, force: bool, champion_cutoff: pd.Timestamp | None = None) -> Trigger:
     """The trigger on a log directory. A running trial blocks a new build;
     --force supplies a reason (manual request) but never lifts a blocker."""
@@ -369,11 +390,22 @@ def main() -> int:
         action="store_true",
         help="also write build= and cutoff= to $GITHUB_OUTPUT",
     )
+    c = sub.add_parser("close", help="end the running trial with a verdict")
+    c.add_argument("--log-dir", type=Path, required=True)
+    c.add_argument("--status", required=True, choices=["promoted", "rejected"])
+    c.add_argument("--reason", required=True)
     r = sub.add_parser("register", help="record a published challenger")
     r.add_argument("--log-dir", type=Path, required=True)
     r.add_argument("--cutoff", required=True)
     r.add_argument("--tag", required=True)
     args = ap.parse_args()
+
+    if args.cmd == "close":
+        state = close_challenger(
+            args.log_dir, args.status, args.reason, pd.Timestamp.now(tz="UTC").floor("s")
+        )
+        print(json.dumps(state, indent=2))
+        return 0
 
     if args.cmd == "register":
         state = register_challenger(
