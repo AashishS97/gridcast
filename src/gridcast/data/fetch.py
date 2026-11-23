@@ -33,7 +33,13 @@ from gridcast.data.entsoe import EntsoeClient
 logger = logging.getLogger(__name__)
 
 RAW_DIR = Path("data/raw/entsoe")
-REFRESH_HORIZON_DAYS = 30
+# Months ending within this many days are always refetched. It must cover the
+# vintage ledger's window (gridcast.serving.daily_log.VINTAGE_DAYS = 60): with
+# a cached raw store (CI keeps one across runs), a month treated as immutable
+# is never asked again, so a revision inside the ledger window would be
+# invisible to the late-revision check. 30 left days aged 31-61 unrefetched
+# at the start of each month.
+REFRESH_HORIZON_DAYS = 62
 POLITE_SLEEP_S = 0.5
 DATA_START = pd.Timestamp("2023-07-01", tz="UTC")
 

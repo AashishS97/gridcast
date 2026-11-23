@@ -97,7 +97,7 @@ class EntsoeClient:
         api_key: str,
         session: requests.Session | None = None,
         max_retries: int = 5,
-        timeout_s: float = 30.0,
+        timeout_s: float = 60.0,  # 30 s read timeouts were common on 2026-11-23
         rate_limit_sleep_s: float = 65.0,
     ) -> None:
         self.api_key = api_key

@@ -82,10 +82,27 @@ jobs:
           python-version: "3.11"
           enable-cache: true
       - run: uv sync --frozen
+      - name: Month stamp for the raw-data cache
+        id: stamp
+        run: echo "month=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+      - name: Restore cached ENTSO-E months
+        uses: actions/cache/restore@v4
+        with:
+          path: data/raw/entsoe
+          key: entsoe-raw-${{ steps.stamp.outputs.month }}-${{ github.run_id }}
+          restore-keys: |
+            entsoe-raw-${{ steps.stamp.outputs.month }}-
       - name: Fetch fresh data and rebuild features
+        id: build
         env:
           ENTSOE_API_KEY: ${{ secrets.ENTSOE_API_KEY }}
         run: uv run --frozen python -m gridcast.build
+      - name: Save ENTSO-E months for the next run
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: actions/cache/save@v4
+        with:
+          path: data/raw/entsoe
+          key: entsoe-raw-${{ steps.stamp.outputs.month }}-${{ github.run_id }}
       - name: Export the challenger
         run: uv run --frozen python -m gridcast.models.export_artifact --cutoff "${CUTOFF}"
       - name: Check and bundle

@@ -50,3 +50,12 @@ def test_retries_are_bounded():
     with pytest.raises(DataSourceError, match="giving up after 5 attempts"):
         EntsoeClient("key", session=session, max_retries=5)._request({})
     assert session.calls == 5
+
+
+def test_refetch_horizon_covers_the_vintage_ledger():
+    # a cached month is never refetched once "immutable": every day the
+    # ledger tracks must sit in a month that is still refetched
+    from gridcast.data.fetch import REFRESH_HORIZON_DAYS
+    from gridcast.serving.daily_log import VINTAGE_DAYS
+
+    assert REFRESH_HORIZON_DAYS >= VINTAGE_DAYS + 1
