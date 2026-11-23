@@ -29,7 +29,11 @@ _RESOLUTIONS = {
     "PT60M": pd.Timedelta(hours=1),
 }
 
-_RETRYABLE_STATUS = {500, 502, 503, 504}
+# Server-side and gateway failures: transient by nature, worth retrying.
+# 599 is not a standard code: ENTSO-E's gateway (uu-gateway-router) returns it
+# for "connectTimeout ... Unable to access service within time limit" -- seen
+# 2026-11-23 failing a 3-year rebuild after ~10 minutes of good requests.
+_RETRYABLE_STATUS = {500, 502, 503, 504, 599}
 
 
 def _fmt_utc(dt: datetime) -> str:
