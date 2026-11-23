@@ -1,0 +1,8 @@
+{
+  "tag": "serving-2026-10-24",
+  "cutoff": "2026-10-24T00:00:00+00:00",
+  "artifact": "lgbm_quantile_2026-10-24",
+  "status": "trial",
+  "registered_at": "2026-11-23T13:02:34+00:00",
+  "code_sha": "86a76e81581a"
+}
