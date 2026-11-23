@@ -1,6 +1,6 @@
 # GridCast drift and data checks
 
-Written by `gridcast.monitoring.drift` at 2026-11-23 15:58 UTC. Thresholds:
+Written by `gridcast.monitoring.drift` at 2026-11-23 19:22 UTC. Thresholds:
 `configs/monitoring.toml`. Feature and target drift compare the recent window with
 the same season in the training years (before 2026-10-01), as
 anomalies from the seasonal average; they are amber at most, because unusual
@@ -36,10 +36,10 @@ inputs are a reason to look, not evidence of worse forecasts.
 
 | check | subject | value | band | zone | note |
 |---|---|---|---|---|---|
-| revisions_seen | load | 7 | [27.0, 28.0] | info | 7 day(s) revised by > 5% in the ledger; ages at revision 27-28 days, median change +13.8% |
+| revisions_seen | load | 8 | [27.0, 28.0] | info | 8 day(s) revised by > 5% in the ledger; ages at revision 27-28 days, median change +13.2% |
 | late_revision | load | 0 |  | green | no day older than 29 days changed in the latest run |
 | final_level | load | 1.05 |  | green | mean of final days aged 30-43 / aged > 43; red below 0.85 |
-| provisional | load | 0.84 |  | info | days aged 1-29 / final days aged 30-43: well below 1 means under-publication is active |
+| provisional | load | 0.842 |  | info | days aged 1-29 / final days aged 30-43: well below 1 means under-publication is active |
 | final_gaps | load | 0 |  | green | every final day has 24 hours |
 | weather_lag | temperature | 6 |  | green | newest day with temperature is 6 days old |
 
