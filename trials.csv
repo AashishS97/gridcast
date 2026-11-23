@@ -1,0 +1,2 @@
+tag,cutoff,registered_at,closed_at,status,reason
+serving-2026-10-24,2026-10-24T00:00:00+00:00,2026-11-23T13:02:34+00:00,2026-11-23T13:35:14+00:00,rejected,"recipe deviation: trained from 2023-11-01, recipe starts 2023-07-01 (fetch window was rolling); never served"
