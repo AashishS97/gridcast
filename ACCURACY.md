@@ -1,18 +1,18 @@
 # GridCast accuracy
 
-Written by `gridcast.monitoring.accuracy` at 2026-11-24 18:57 UTC from
+Written by `gridcast.monitoring.accuracy` at 2026-11-25 18:01 UTC from
 hourly.csv. Bands resample whole days (origins), not hours: a forecast's 24
 hours fail together. Thresholds: `configs/monitoring.toml`. Bands are 95%.
 
-## Trailing window: 25 origins (2026-10-01 to 2026-10-25)
+## Trailing window: 26 origins (2026-10-01 to 2026-10-26)
 
 | served forecast | value | band | zone |
 |---|---|---|---|
-| 80% interval coverage | 79.8% | [73.2%, 85.8%] | green |
-| p50 MAE (MW) | 266.4 | [222.3, 313.7] | |
-| seasonal-naive MAE (MW) | 539.8 | | |
-| skill vs naive (1 - MAE ratio) | 0.506 | [0.397, 0.589] | green |
-| mean interval width (MW) | 890 | | |
+| 80% interval coverage | 79.6% | [73.4%, 85.4%] | green |
+| p50 MAE (MW) | 271.3 | [228.0, 318.6] | |
+| seasonal-naive MAE (MW) | 555.5 | | |
+| skill vs naive (1 - MAE ratio) | 0.512 | [0.405, 0.589] | green |
+| mean interval width (MW) | 893 | | |
 
 ## Raw quantiles against the baselines
 
@@ -22,14 +22,14 @@ is consistent with it; outside, the live period differs from the reference.
 
 | raw quantiles | shadow window | band | pool | backtest gate |
 |---|---|---|---|---|
-| p50 MAE (MW) | 310.1 | [262.5, 362.9] | 246.6 | 256.9 |
-| 80% coverage | 61.7% | [53.2%, 69.8%] | 64.2% | 65.5% |
+| p50 MAE (MW) | 314.8 | [267.8, 367.3] | 246.6 | 256.9 |
+| 80% coverage | 60.9% | [52.7%, 68.9%] | 64.2% | 65.5% |
 
 - pool: calibration pool (60 origins 2026-08-02 to 2026-09-30; out-of-sample, one retrain per origin, not a sealed holdout)
 - backtest gate: backtest gate (14 pinned dev folds, daily retrain, an earlier period)
-- shadow raw values available for 25 of 25 origins
+- shadow raw values available for 26 of 26 origins
 
-## Per hour, all 25 scored origins
+## Per hour, all 26 scored origins
 
 Horizon h is UTC hour h-1 (origins are midnight UTC): hour-of-day and
 horizon effects are confounded. Per-hour bands rest on few days; read them
@@ -37,27 +37,27 @@ as where to look, not as findings.
 
 | h | UTC | p50 MAE (MW) | band | coverage | band |
 |---|---|---|---|---|---|
-| 1 | 00 | 277 | [125, 528] | 76% | [60%, 92%] |
-| 2 | 01 | 212 | [149, 290] | 80% | [64%, 92%] |
-| 3 | 02 | 186 | [123, 266] | 88% | [76%, 100%] |
-| 4 | 03 | 144 | [89, 212] | 88% | [72%, 100%] |
-| 5 | 04 | 161 | [112, 219] | 92% | [80%, 100%] |
-| 6 | 05 | 154 | [113, 196] | 92% | [80%, 100%] |
-| 7 | 06 | 196 | [143, 255] | 76% | [60%, 92%] |
-| 8 | 07 | 331 | [231, 432] | 64% | [44%, 84%] |
-| 9 | 08 | 364 | [261, 471] | 72% | [52%, 88%] |
-| 10 | 09 | 311 | [216, 421] | 76% | [60%, 92%] |
-| 11 | 10 | 378 | [255, 524] | 84% | [68%, 96%] |
-| 12 | 11 | 535 | [372, 720] | 68% | [48%, 84%] |
-| 13 | 12 | 422 | [296, 557] | 72% | [52%, 88%] |
-| 14 | 13 | 389 | [280, 505] | 76% | [60%, 92%] |
-| 15 | 14 | 427 | [324, 536] | 72% | [52%, 88%] |
-| 16 | 15 | 434 | [330, 550] | 60% | [40%, 80%] |
-| 17 | 16 | 248 | [183, 316] | 72% | [52%, 88%] |
-| 18 | 17 | 130 | [94, 170] | 92% | [80%, 100%] |
-| 19 | 18 | 160 | [111, 215] | 92% | [80%, 100%] |
-| 20 | 19 | 136 | [96, 182] | 96% | [88%, 100%] |
-| 21 | 20 | 137 | [97, 182] | 92% | [80%, 100%] |
-| 22 | 21 | 144 | [103, 190] | 92% | [80%, 100%] |
-| 23 | 22 | 276 | [205, 355] | 72% | [52%, 88%] |
-| 24 | 23 | 241 | [168, 323] | 72% | [52%, 88%] |
+| 1 | 00 | 298 | [140, 550] | 73% | [54%, 88%] |
+| 2 | 01 | 215 | [154, 287] | 81% | [65%, 96%] |
+| 3 | 02 | 193 | [130, 269] | 85% | [69%, 96%] |
+| 4 | 03 | 141 | [88, 205] | 88% | [77%, 100%] |
+| 5 | 04 | 161 | [113, 217] | 92% | [81%, 100%] |
+| 6 | 05 | 184 | [124, 261] | 88% | [77%, 100%] |
+| 7 | 06 | 206 | [150, 264] | 73% | [54%, 88%] |
+| 8 | 07 | 329 | [234, 430] | 65% | [46%, 85%] |
+| 9 | 08 | 360 | [259, 462] | 73% | [58%, 88%] |
+| 10 | 09 | 315 | [220, 421] | 77% | [62%, 92%] |
+| 11 | 10 | 391 | [269, 532] | 85% | [69%, 96%] |
+| 12 | 11 | 544 | [385, 730] | 69% | [50%, 85%] |
+| 13 | 12 | 441 | [315, 578] | 73% | [54%, 88%] |
+| 14 | 13 | 378 | [270, 494] | 77% | [62%, 92%] |
+| 15 | 14 | 419 | [320, 525] | 73% | [54%, 88%] |
+| 16 | 15 | 423 | [320, 537] | 62% | [42%, 81%] |
+| 17 | 16 | 247 | [184, 311] | 73% | [54%, 88%] |
+| 18 | 17 | 132 | [97, 169] | 92% | [81%, 100%] |
+| 19 | 18 | 160 | [114, 214] | 92% | [81%, 100%] |
+| 20 | 19 | 143 | [103, 189] | 96% | [88%, 100%] |
+| 21 | 20 | 147 | [104, 193] | 88% | [73%, 100%] |
+| 22 | 21 | 168 | [114, 236] | 88% | [77%, 100%] |
+| 23 | 22 | 280 | [212, 357] | 73% | [54%, 88%] |
+| 24 | 23 | 235 | [164, 314] | 73% | [54%, 88%] |
