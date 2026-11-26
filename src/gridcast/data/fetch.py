@@ -50,7 +50,10 @@ def month_starts(start: pd.Timestamp, now: pd.Timestamp) -> pd.DatetimeIndex:
     return pd.date_range(first, now, freq="MS")
 
 
-def fetch_and_cache(source: LoadSource, kind: LoadKind, start: pd.Timestamp = DATA_START) -> None:
+def fetch_and_cache(
+    source: LoadSource, kind: LoadKind, start: pd.Timestamp = DATA_START
+) -> tuple[int, int]:
+    """Fetch every month not cached as immutable; return (fetched, cached)."""
     now = pd.Timestamp.now(tz="UTC")
     out_dir = RAW_DIR / kind.value
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -77,6 +80,7 @@ def fetch_and_cache(source: LoadSource, kind: LoadKind, start: pd.Timestamp = DA
         time.sleep(POLITE_SLEEP_S)
 
     logger.info("%s: fetched %d months, skipped %d cached months", kind.value, fetched, skipped)
+    return fetched, skipped
 
 
 def load_raw(kind: LoadKind) -> pd.DataFrame:

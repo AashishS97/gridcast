@@ -1,0 +1,5 @@
+# Streamlit Community Cloud installs these for dashboard/app.py; the
+# dashboard reads CSVs only, so it does not need the gridcast package
+streamlit>=1.50
+pandas>=2.2
+altair>=5

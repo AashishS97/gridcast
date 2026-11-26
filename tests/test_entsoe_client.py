@@ -59,3 +59,11 @@ def test_refetch_horizon_covers_the_vintage_ledger():
     from gridcast.serving.daily_log import VINTAGE_DAYS
 
     assert REFRESH_HORIZON_DAYS >= VINTAGE_DAYS + 1
+
+
+def test_requests_and_retries_are_counted():
+    session = FakeSession([599, 503, 200, 200])
+    client = EntsoeClient("key", session=session)
+    client._request({})
+    client._request({})
+    assert (client.n_requests, client.n_retries) == (4, 2)

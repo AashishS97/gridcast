@@ -13,6 +13,7 @@ processed outputs from the existing raw cache without any network.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 from pathlib import Path
@@ -30,6 +31,8 @@ from gridcast.features.build import build_feature_table
 logger = logging.getLogger(__name__)
 
 FEATURES_PATH = Path("data/processed/features.parquet")
+# What this build cost upstream; the daily log copies it into runs.csv
+FETCH_STATS_PATH = Path("data/processed/fetch_stats.json")
 
 
 def main() -> None:
@@ -46,8 +49,19 @@ def main() -> None:
         if not api_key:
             raise SystemExit("ENTSOE_API_KEY not set — put it in .env")
         client = EntsoeClient(api_key=api_key)
+        fetched = cached = 0
         for kind in LoadKind:
-            fetch_and_cache(client, kind)
+            f, c = fetch_and_cache(client, kind)
+            fetched, cached = fetched + f, cached + c
+        PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+        stats = {
+            "entsoe_requests": client.n_requests,
+            "entsoe_retries": client.n_retries,
+            "months_fetched": fetched,
+            "months_cached": cached,
+        }
+        FETCH_STATS_PATH.write_text(json.dumps(stats) + "\n", encoding="utf-8")
+        logger.info("ENTSO-E: %s", stats)
 
         end_date = (
             pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=weather.ARCHIVE_LAG_DAYS)

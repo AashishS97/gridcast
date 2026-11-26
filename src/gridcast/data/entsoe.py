@@ -105,6 +105,8 @@ class EntsoeClient:
         self.max_retries = max_retries
         self.timeout_s = timeout_s
         self.rate_limit_sleep_s = rate_limit_sleep_s
+        self.n_requests = 0  # HTTP calls made, retries included
+        self.n_retries = 0  # calls that failed and were repeated
 
     def fetch_load(self, kind: LoadKind, start: datetime, end: datetime) -> pd.DataFrame:
         params = {
@@ -128,6 +130,9 @@ class EntsoeClient:
         last_error = "no attempts made"
 
         for attempt in range(1, self.max_retries + 1):
+            self.n_requests += 1
+            if attempt > 1:
+                self.n_retries += 1
             try:
                 resp = self.session.get(BASE_URL, params=full_params, timeout=self.timeout_s)
             except (requests.ConnectionError, requests.Timeout) as exc:

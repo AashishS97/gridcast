@@ -25,7 +25,8 @@ gate measure RAW quantiles, so they are set against the shadow's raw
 quantiles (served minus the conformal shift), not against the served ones.
 
 Run:  uv run python -m gridcast.monitoring.accuracy --log-dir forecast-log
-      writes ACCURACY.md, appends zones.csv
+      writes ACCURACY.md, rolling.csv (the trailing window ending at every
+      origin, for the dashboard) and by_horizon.csv; appends zones.csv
 Exit: 0 green/amber/insufficient; 2 if any zone is red (an escalation, not a
       crash: the files are written first).
 """
@@ -406,8 +407,12 @@ def run(
         s: dict = {"n_origins": 0, "status": "no_data"}
         horizon = None
     else:
-        s = window_summary(daily_table(hourly), cfg)
+        daily = daily_table(hourly)
+        s = window_summary(daily, cfg)
         horizon = by_horizon(hourly, cfg)
+        # precomputed for the dashboard, which reads files and computes nothing
+        write_log(rolling_table(daily, cfg), log_dir / "rolling.csv")
+        horizon.to_csv(log_dir / "by_horizon.csv", index=False, float_format="%.4f")
     lines = report_lines(s, horizon, baselines(manifest, gate_baseline), cfg, now)
     (log_dir / "ACCURACY.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 

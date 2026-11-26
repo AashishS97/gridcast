@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   pull-requests: write  # the promotion PR when a challenger wins its trial
+  actions: read  # the run history, for run health on the dashboard
 
 concurrency:
   group: daily-shadow
@@ -137,6 +138,14 @@ jobs:
         run: |
           uv run --frozen python -m gridcast.monitoring.retraining close --log-dir log --status rejected --reason "trial: ${REASON}"
           gh release edit "${TAG}" --title "REJECTED challenger ${CUTOFF}"
+      - name: Run history and run health
+        if: ${{ !cancelled() && steps.daily.outcome != 'skipped' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/actions/runs?per_page=100" > runs.json
+          uv run --frozen python -m gridcast.monitoring.runs --json runs.json --log-dir log
+          rm runs.json
       - name: Commit and push the log
         if: ${{ !cancelled() && steps.daily.outcome != 'skipped' }}
         run: |

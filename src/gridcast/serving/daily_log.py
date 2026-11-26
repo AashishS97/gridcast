@@ -38,6 +38,7 @@ logged, so the failure is visible in runs.csv as well as in CI).
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -45,6 +46,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from gridcast.models.export_artifact import PROJECT_ROOT
 from gridcast.models.metrics import interval_coverage, mae, mean_interval_width, pinball_loss
 from gridcast.serving.forecaster import Forecaster, from_config
 
@@ -53,6 +55,7 @@ FORECAST_COLS = [
     "trust_low", "trust_reasons", "artifact", "data_as_of", "logged_at",
     "p10_raw", "p50_raw", "p90_raw",
 ]  # fmt: skip
+FETCH_STAT_COLS = ("entsoe_requests", "entsoe_retries", "months_cached")
 HOURLY_COLS = [
     "origin", "timestamp", "horizon", "y", "p10", "p50", "p90",
     "p10_raw", "p50_raw", "p90_raw", "naive_168", "artifact", "scored_at",
@@ -64,11 +67,15 @@ SCORE_COLS = [
 RUN_COLS = [
     "run_at", "artifact", "data_as_of", "provisional_from", "n_servable",
     "last_servable", "new_forecasts", "new_scores", "status", "code_sha",
+    "entsoe_requests", "entsoe_retries", "months_cached",
 ]  # fmt: skip
 INPUT_KEYS = ["origin", "timestamp", "horizon", "artifact", "logged_at"]
 VINTAGE_COLS = ["run_at", "data_as_of", "day", "load_hours", "load_mean_mw", "temp_mean_c"]
 # columns added after a log file first existed: older files get them as empty
-ADDED_COLS = {"code_sha", "p10_raw", "p50_raw", "p90_raw"}
+ADDED_COLS = {
+    "code_sha", "p10_raw", "p50_raw", "p90_raw",
+    "entsoe_requests", "entsoe_retries", "months_cached",
+}  # fmt: skip
 TIME_COLS = {"origin", "timestamp", "data_as_of", "logged_at", "scored_at", "run_at",
              "provisional_from", "last_servable", "day", "window_first",
              "window_last"}  # fmt: skip
@@ -304,7 +311,7 @@ def summary_lines(fc: Forecaster, scores: pd.DataFrame, run: dict) -> list[str]:
     return lines
 
 
-def run(fc: Forecaster, log_dir: Path, now: pd.Timestamp) -> int:
+def run(fc: Forecaster, log_dir: Path, now: pd.Timestamp, fetch_stats: dict | None = None) -> int:
     log_dir.mkdir(parents=True, exist_ok=True)
     names = ("forecasts", "inputs", "scores", "hourly", "vintages", "runs")
     paths = {name: log_dir / f"{name}.csv" for name in names}
@@ -339,6 +346,8 @@ def run(fc: Forecaster, log_dir: Path, now: pd.Timestamp) -> int:
         "new_scores": len(scored_now),
         "status": status,
         "code_sha": (os.environ.get("GITHUB_SHA") or "local")[:12],
+        # what this run's build cost upstream (gridcast.build writes it)
+        **{k: (fetch_stats or {}).get(k, np.nan) for k in FETCH_STAT_COLS},
     }
     runs = read_log(paths["runs"], RUN_COLS)
     runs = append(runs, pd.DataFrame([run_row], columns=RUN_COLS))
@@ -376,7 +385,9 @@ def main() -> int:
     args = ap.parse_args()
     args.log_dir.mkdir(parents=True, exist_ok=True)
     fc = from_config(args.artifact_dir)
-    return run(fc, args.log_dir, pd.Timestamp.now(tz="UTC").floor("s"))
+    stats_path = PROJECT_ROOT / "data" / "processed" / "fetch_stats.json"
+    stats = json.loads(stats_path.read_text(encoding="utf-8")) if stats_path.exists() else None
+    return run(fc, args.log_dir, pd.Timestamp.now(tz="UTC").floor("s"), stats)
 
 
 if __name__ == "__main__":

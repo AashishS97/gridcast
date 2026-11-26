@@ -170,6 +170,9 @@ def test_run_writes_report_and_zone_history(tmp_path):
     assert "246.6" in text and "256.9" in text
     zones = pd.read_csv(tmp_path / "zones.csv")
     assert len(zones) == 2
+    rolling = pd.read_csv(tmp_path / "rolling.csv")  # dashboard series
+    assert rolling["n_origins"].tolist() == list(range(CFG.min_origins, 21))
+    assert len(pd.read_csv(tmp_path / "by_horizon.csv")) == 24
     assert zones["n_origins"].tolist() == [20, 20]
 
 

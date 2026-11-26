@@ -189,3 +189,17 @@ def test_raw_recovered_for_rows_logged_before_raw_columns(artifact, synthetic_fr
     h = read_log(tmp_path / "hourly.csv", HOURLY_COLS)
     assert h["p50_raw"].notna().all()
     np.testing.assert_allclose(h["p50"] - h["p50_raw"], artifact.shifts["q50"], atol=0.11)
+
+
+def test_fetch_stats_are_recorded_per_run(artifact, synthetic_frame, tmp_path):
+    fc = make(artifact, synthetic_frame, provisional_days=10)
+    stats = {"entsoe_requests": 7, "entsoe_retries": 1, "months_cached": 76}
+    run(fc, tmp_path, utc("2024-10-27 06:00"), stats)
+    run(fc, tmp_path, utc("2024-10-28 06:00"))  # e.g. an --offline build: no stats
+    runs = read_log(tmp_path / "runs.csv", RUN_COLS)
+    assert runs[["entsoe_requests", "entsoe_retries", "months_cached"]].iloc[0].tolist() == [
+        7,
+        1,
+        76,
+    ]
+    assert runs["entsoe_requests"].iloc[1] != runs["entsoe_requests"].iloc[1]  # NaN
