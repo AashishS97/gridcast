@@ -1,6 +1,6 @@
 # GridCast accuracy
 
-Written by `gridcast.monitoring.accuracy` at 2026-11-26 06:17 UTC from
+Written by `gridcast.monitoring.accuracy` at 2026-11-26 06:40 UTC from
 hourly.csv. Bands resample whole days (origins), not hours: a forecast's 24
 hours fail together. Thresholds: `configs/monitoring.toml`. Bands are 95%.
 

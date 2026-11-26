@@ -1,6 +1,6 @@
 # GridCast drift and data checks
 
-Written by `gridcast.monitoring.drift` at 2026-11-26 06:17 UTC. Thresholds:
+Written by `gridcast.monitoring.drift` at 2026-11-26 06:40 UTC. Thresholds:
 `configs/monitoring.toml`. Feature and target drift compare the recent window with
 the same season in the training years (before 2026-10-01), as
 anomalies from the seasonal average; they are amber at most, because unusual
