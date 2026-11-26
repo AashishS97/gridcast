@@ -661,6 +661,10 @@ is for.
   per-origin.
 - Origins are midnight UTC, so horizon and hour of day are perfectly
   confounded in all per-horizon analyses.
+- Backtest outputs (`data/backtests`) and the 2026-11-15 pre-refetch
+  ENTSO-E snapshot are local-only and cannot be rebuilt (upstream values were
+  revised since). Backed up privately on 2026-11-26 as one zip, sha256
+  `88178E0703B31DE90B7A194DD772EB2475148CCD0B334B26E0C0A08FC8DE71D9`.
 
 ## Project structure
 
