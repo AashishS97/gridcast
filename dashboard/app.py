@@ -24,8 +24,8 @@ import data  # noqa: E402
 # reference palette (dataviz skill): categorical slots 1-3, status colours,
 # secondary ink for reference lines; status never carries meaning alone
 BLUE, ORANGE, AQUA = "#257de0", "#f47230", "#00b894"
-BAND = "#b6d5f8"
-INK2 = "#666666"
+BAND = "#519ced"  # blue step 350: a band that reads on light and dark surfaces
+INK2 = "#9c9c9c"  # reference lines: secondary ink that stays visible on dark
 STATUS = {"green": "#0aac23", "amber": "#fbb315", "red": "#dc3c3d"}
 ICON = {"green": "🟢", "amber": "🟠", "red": "🔴", "other": "⚪"}
 
@@ -51,6 +51,11 @@ def load() -> dict:
     return out
 
 
+def day_axis(field: str) -> alt.X:
+    """Daily data on a time axis: label days, not Vega's default hour ticks."""
+    return alt.X(field, title="", axis=alt.Axis(format="%b %d", labelAngle=0, tickCount="day"))
+
+
 def rule(y: float, dash: bool = True) -> alt.Chart:
     return (
         alt.Chart(pd.DataFrame({"y": [y]}))
@@ -68,16 +73,15 @@ def band_line(
     title: str,
     fmt: str = ",.1f",
     ref: float | None = None,
-    x_title: str = "",
 ) -> alt.Chart:
-    base = alt.Chart(df).encode(x=alt.X(f"{x}:T", title=x_title))
+    base = alt.Chart(df).encode(x=day_axis(f"{x}:T"))
     tip = [
         alt.Tooltip(f"{x}:T", title="window ends"),
         alt.Tooltip(f"{y}:Q", format=fmt),
         alt.Tooltip(f"{lo}:Q", format=fmt, title="band low"),
         alt.Tooltip(f"{hi}:Q", format=fmt, title="band high"),
     ]
-    area = base.mark_area(color=BAND, opacity=0.6).encode(
+    area = base.mark_area(color=BAND, opacity=0.25).encode(
         y=alt.Y(f"{lo}:Q", title=title, axis=alt.Axis(format=fmt), scale=alt.Scale(zero=False)),
         y2=f"{hi}:Q",
     )
@@ -260,7 +264,7 @@ with tabs[2]:
                 alt.Chart(hist)
                 .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
                 .encode(
-                    x=alt.X("day:T", title=""),
+                    x=day_axis("day:T"),
                     y=alt.Y("checks:Q", title="checks", stack=True),
                     color=alt.Color(
                         "level:N",
@@ -282,7 +286,7 @@ with tabs[2]:
                 alt.Chart(prov)
                 .mark_line(color=BLUE, strokeWidth=2, point=True)
                 .encode(
-                    x=alt.X("run_at:T", title=""),
+                    x=day_axis("run_at:T"),
                     y=alt.Y(
                         "value:Q",
                         title="young days / first final days",
@@ -330,7 +334,7 @@ with tabs[3]:
                 alt.Tooltip("decision:N"),
             ]
             chart = alt.layer(
-                base.mark_area(color=BAND, opacity=0.6).encode(
+                base.mark_area(color=BAND, opacity=0.25).encode(
                     y=alt.Y(
                         "rel_lo:Q", title="challenger / champion - 1", axis=alt.Axis(format="+.0%")
                     ),
@@ -351,7 +355,11 @@ with tabs[3]:
     trials = d["trials"]
     if trials is not None and len(trials):
         st.subheader("Trial history")
-        st.dataframe(trials, width="stretch", hide_index=True)
+        shown = trials.copy()
+        for col in ("cutoff", "registered_at", "closed_at"):
+            if col in shown:
+                shown[col] = pd.to_datetime(shown[col], utc=True).dt.strftime("%Y-%m-%d %H:%M")
+        st.dataframe(shown, width="stretch", hide_index=True)
 
 # --- run health & budget ------------------------------------------------------------
 with tabs[4]:
@@ -361,10 +369,12 @@ with tabs[4]:
         "and nothing fails when that happens. The daily job is due at 07:17 UTC."
     )
     if rh is not None and len(rh):
-        missed = rh[~rh["scheduled_daily"]]
+        # today is still open: its scheduled run may simply not have started yet
+        past = rh[rh["day"] < now.floor("D")]
         st.write(
-            f"**Days without a scheduled daily run:** {len(missed)} of {len(rh)}; "
-            f"days with no successful daily run: {int((~rh['daily_ok']).sum())}."
+            f"**Completed days without a scheduled daily run:** "
+            f"{int((~past['scheduled_daily']).sum())} of {len(past)}; with no successful "
+            f"daily run: {int((~past['daily_ok']).sum())}. Today is excluded until it ends."
         )
         sched = rh.dropna(subset=["schedule_delay_min"])
         if len(sched):
@@ -373,7 +383,7 @@ with tabs[4]:
                 alt.Chart(sched)
                 .mark_bar(color=BLUE, cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
                 .encode(
-                    x=alt.X("day:T", title=""),
+                    x=day_axis("day:T"),
                     y=alt.Y("schedule_delay_min:Q", title="minutes late"),
                     tooltip=[
                         alt.Tooltip("day:T"),
@@ -392,7 +402,7 @@ with tabs[4]:
             alt.Chart(per)
             .mark_bar()
             .encode(
-                x=alt.X("day:T", title=""),
+                x=day_axis("day:T"),
                 y=alt.Y("minutes:Q", title="minutes", stack=True),
                 color=alt.Color(
                     "workflow:N",
@@ -412,7 +422,7 @@ with tabs[4]:
             alt.Chart(rr)
             .mark_bar(color=BLUE, cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
             .encode(
-                x=alt.X("run_at:T", title=""),
+                x=day_axis("run_at:T"),
                 y=alt.Y("entsoe_requests:Q", title="requests"),
                 tooltip=[
                     alt.Tooltip("run_at:T", title="run"),

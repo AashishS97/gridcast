@@ -85,3 +85,9 @@ def test_cron_constant_matches_the_workflow():
     text = (Path(__file__).parents[1] / ".github" / "workflows" / "daily.yml").read_text()
     minute, hour = re.search(r'cron: "(\d+) (\d+) \* \* \*"', text).groups()
     assert (int(hour), int(minute)) == DAILY_CRON_UTC
+
+
+def test_health_starts_when_the_daily_workflow_first_ran():
+    early_ci = run(9, "CI", "push", "2026-11-20 10:00", 3)
+    h = daily_health(parse_runs({"workflow_runs": [early_ci, *PAYLOAD["workflow_runs"]]}))
+    assert h["day"].min() == pd.Timestamp("2026-11-24", tz="UTC")

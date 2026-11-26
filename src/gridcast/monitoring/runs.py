@@ -98,7 +98,11 @@ def daily_health(runs: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=HEALTH_COLS)
     r = runs.copy()
     r["day"] = r["created_at"].dt.floor("D")
-    days = pd.date_range(r["day"].min(), r["day"].max(), freq="D")
+    # from the first day the daily workflow ran at all: earlier days (CI only)
+    # would count as "missed" runs of a workflow that did not exist yet
+    daily_days = r.loc[r["workflow"] == DAILY_WORKFLOW, "day"]
+    first = daily_days.min() if len(daily_days) else r["day"].min()
+    days = pd.date_range(first, r["day"].max(), freq="D")
     out = []
     for day in days:
         d = r[r["day"] == day]
