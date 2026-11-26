@@ -7,21 +7,21 @@ target day is final. Scores are of the served, conformally calibrated forecast.
 
 ## Latest run
 
-- run at: 2026-11-25 18:01 UTC, status `ok`
+- run at: 2026-11-26 06:17 UTC, status `ok`
 - artifact: `lgbm_quantile_2026-10-01`
-- data vintage: 2026-11-25 16:00 UTC (provisional from 2026-10-27 16:00)
-- servable origins: 27, newest 2026-10-27
+- data vintage: 2026-11-26 04:00 UTC (provisional from 2026-10-28 04:00)
+- servable origins: 28, newest 2026-10-28
 - this run: 1 new forecast(s), 1 new score(s)
 
 ## Shadow evaluation so far
 
 | metric | value |
 |---|---|
-| origins scored | 26 (2026-10-01 to 2026-10-26) |
-| MAE p50 (MW) | 271.3 |
-| mean pinball (MW) | 92.8 |
+| origins scored | 27 (2026-10-01 to 2026-10-27) |
+| MAE p50 (MW) | 269.9 |
+| mean pinball (MW) | 92.5 |
 | 80% interval coverage | 79.6% (target 80%) |
-| mean interval width (MW) | 893 |
+| mean interval width (MW) | 888 |
 
 These are the served (calibrated) quantiles. For comparisons with the backtest
 and calibration-pool baselines (which are raw, pre-calibration), rolling windows
