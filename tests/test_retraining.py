@@ -222,3 +222,76 @@ def test_close_records_the_verdict_and_unblocks(tmp_path):
         close_challenger(tmp_path, "promoted", "again", utc("2026-11-23 15:00"))
     with pytest.raises(ValueError):
         close_challenger(tmp_path, "maybe", "x", utc("2026-11-23 15:00"))
+
+
+def test_trial_state_inactive_active_merged(tmp_path):
+    from gridcast.monitoring.retraining import register_challenger, trial_state
+
+    assert trial_state(tmp_path, CHAMP) == {"active": False}
+    register_challenger(tmp_path, utc("2026-10-27"), "serving-2026-10-27", utc("2026-11-26"))
+    s = trial_state(tmp_path, CHAMP)
+    assert s == {
+        "active": True,
+        "tag": "serving-2026-10-27",
+        "artifact": "lgbm_quantile_2026-10-27",
+        "cutoff": "2026-10-27",
+        "merged": False,
+    }
+    assert trial_state(tmp_path, utc("2026-10-27"))["merged"]  # serving.toml now names it
+
+
+def test_record_comparison_writes_report_and_progress(tmp_path):
+    from gridcast.monitoring.retraining import record_comparison, register_challenger
+    from gridcast.serving.daily_log import write_log
+
+    champ = hourly(20, [24, 20, 18, 22], seed=0)
+    trial = tmp_path / "trials" / "serving-2026-10-01"
+    trial.mkdir(parents=True)
+    register_challenger(tmp_path, utc("2026-10-01"), "serving-2026-10-01", utc("2026-10-01"))
+
+    c = record_comparison(tmp_path, trial, CFG, ACC, utc("2026-10-02"))  # nothing scored yet
+    assert c.decision == "wait" and c.n_paired == 0
+
+    write_log(champ, tmp_path / "hourly.csv")
+    write_log(shifted(champ, 0.97).head(14 * 24), trial / "hourly.csv")
+    c = record_comparison(tmp_path, trial, CFG, ACC, utc("2026-10-16"))
+    assert c.decision == "promote"
+    text = (tmp_path / "TRIAL.md").read_text(encoding="utf-8")
+    assert "**Decision: promote**" in text and "Rollback = revert" in text
+    progress = pd.read_csv(tmp_path / "trial_progress.csv")
+    assert progress["decision"].tolist() == ["wait", "promote"]
+    assert progress["n_paired"].tolist() == [0, 14]
+
+
+def test_bundle_ref_reads_and_sets_the_cutoff_keeping_the_bom(tmp_path):
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location(
+        "bundle_ref", Path(__file__).parents[1] / ".github" / "scripts" / "bundle_ref.py"
+    )
+    br = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(br)
+
+    toml = tmp_path / "serving.toml"
+    toml.write_bytes(
+        b"\xef\xbb\xbf# comment\n[artifact]\n"
+        b'train_cutoff = "2026-10-01T00:00:00Z"\noutput_root = "models"\n'
+    )
+    assert br.read_cutoff(toml) == "2026-10-01"
+    assert br.refs("2026-10-27") == {
+        "tag": "serving-2026-10-27",
+        "file": "serving_bundle_2026-10-27.tar.gz",
+        "artifact": "lgbm_quantile_2026-10-27",
+        "cutoff": "2026-10-27",
+    }
+    br.set_cutoff("2026-10-27", "promoted from serving-2026-10-27", toml)
+    data = toml.read_bytes()
+    assert data.startswith(b"\xef\xbb\xbf# comment\n[artifact]\n")  # BOM and the rest kept
+    assert br.read_cutoff(toml) == "2026-10-27"
+    assert b'output_root = "models"' in data
+    with pytest.raises(SystemExit):
+        br.set_cutoff("27-10-2026", "", toml)
+    # the real config is readable by the same code the workflows run
+    real = br.read_cutoff(Path(__file__).parents[1] / "configs" / "serving.toml")
+    assert pd.Timestamp(real).strftime("%Y-%m-%d") == real

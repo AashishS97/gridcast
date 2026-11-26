@@ -7,20 +7,19 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write  # the promotion PR when a challenger wins its trial
 
 concurrency:
   group: daily-shadow
   cancel-in-progress: false
 
 env:
-  BUNDLE_TAG: serving-2026-10-01
-  BUNDLE_FILE: serving_bundle_2026-10-01.tar.gz
   LOG_BRANCH: forecast-log
 
 jobs:
   shadow:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v7
@@ -28,7 +27,13 @@ jobs:
           python-version: "3.11"
           enable-cache: true
       - run: uv sync --frozen
+      - name: Which bundle is the champion (configs/serving.toml)
+        id: champion
+        run: python3 .github/scripts/bundle_ref.py | tee -a "$GITHUB_OUTPUT"
       - name: Download the frozen model (not its data)
+        env:
+          BUNDLE_TAG: ${{ steps.champion.outputs.tag }}
+          BUNDLE_FILE: ${{ steps.champion.outputs.file }}
         run: |
           curl -fsSL -o bundle.tar.gz "https://github.com/${{ github.repository }}/releases/download/${BUNDLE_TAG}/${BUNDLE_FILE}"
           tar -xzf bundle.tar.gz models/
@@ -87,6 +92,51 @@ jobs:
           echo "code=${code}" >> "$GITHUB_OUTPUT"
           if [ "${code}" -eq 2 ]; then exit 0; fi
           exit "${code}"
+      - name: Trial state
+        id: trial
+        if: ${{ !cancelled() && steps.daily.outcome != 'skipped' }}
+        run: uv run --frozen python -m gridcast.monitoring.retraining trial-state --log-dir log --github-output
+      - name: Close a promoted trial
+        if: ${{ steps.trial.outputs.merged == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.trial.outputs.tag }}
+          CUTOFF: ${{ steps.trial.outputs.cutoff }}
+        run: |
+          uv run --frozen python -m gridcast.monitoring.retraining close --log-dir log --status promoted --reason "promotion PR merged: serving.toml train_cutoff = ${CUTOFF}"
+          gh release edit "${TAG}" --prerelease=false --title "Champion ${CUTOFF}"
+      - name: Challenger shadow forecast
+        id: challenger
+        if: ${{ steps.trial.outputs.active == 'true' && steps.trial.outputs.merged != 'true' }}
+        env:
+          TAG: ${{ steps.trial.outputs.tag }}
+          ARTIFACT: ${{ steps.trial.outputs.artifact }}
+          CUTOFF: ${{ steps.trial.outputs.cutoff }}
+        run: |
+          curl -fsSL -o challenger.tar.gz "https://github.com/${{ github.repository }}/releases/download/${TAG}/serving_bundle_${CUTOFF}.tar.gz"
+          tar -xzf challenger.tar.gz "models/${ARTIFACT}"
+          rm challenger.tar.gz
+          set +e
+          uv run --frozen python -m gridcast.serving.daily_log --log-dir "log/trials/${TAG}" --artifact-dir "models/${ARTIFACT}"
+          code=$?
+          if [ "${code}" -gt 1 ]; then exit "${code}"; fi
+          exit 0
+      - name: Compare champion and challenger
+        id: compare
+        if: ${{ steps.challenger.outcome == 'success' }}
+        env:
+          TAG: ${{ steps.trial.outputs.tag }}
+        run: uv run --frozen python -m gridcast.monitoring.retraining compare --log-dir log --trial-dir "log/trials/${TAG}" --github-output
+      - name: Reject the challenger
+        if: ${{ steps.compare.outputs.decision == 'reject' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.trial.outputs.tag }}
+          CUTOFF: ${{ steps.trial.outputs.cutoff }}
+          REASON: ${{ steps.compare.outputs.reason }}
+        run: |
+          uv run --frozen python -m gridcast.monitoring.retraining close --log-dir log --status rejected --reason "trial: ${REASON}"
+          gh release edit "${TAG}" --title "REJECTED challenger ${CUTOFF}"
       - name: Commit and push the log
         if: ${{ !cancelled() && steps.daily.outcome != 'skipped' }}
         run: |
@@ -98,6 +148,24 @@ jobs:
             git commit -m "daily: $(date -u +%Y-%m-%d)"
             git push origin "HEAD:${LOG_BRANCH}"
           fi
+      - name: Open the promotion PR
+        if: ${{ !cancelled() && steps.compare.outputs.decision == 'promote' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.trial.outputs.tag }}
+          CUTOFF: ${{ steps.trial.outputs.cutoff }}
+        run: |
+          branch="promote/${TAG}"
+          open=$(gh pr list --head "${branch}" --state open --json number --jq length)
+          if [ "${open}" != "0" ]; then
+            echo "promotion PR for ${TAG} already open: waiting for review"
+            exit 0
+          fi
+          git switch -c "${branch}"
+          python3 .github/scripts/bundle_ref.py --set-cutoff "${CUTOFF}" --note "promoted from ${TAG}: paired trial passed, see TRIAL.md on ${LOG_BRANCH}"
+          git commit -am "promote ${TAG}: serving.toml train_cutoff = ${CUTOFF}"
+          git push --force origin "${branch}"
+          gh pr create --base main --head "${branch}" --title "Promote ${TAG} to champion" --body-file log/TRIAL.md
       - name: Escalate a red zone
         if: ${{ !cancelled() && (steps.accuracy.outputs.code == '2' || steps.drift.outputs.code == '2') }}
         env:

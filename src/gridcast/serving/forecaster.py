@@ -327,11 +327,15 @@ class Forecaster:
         }
 
 
-def from_config() -> Forecaster:
+def from_config(artifact_dir: Path | None = None) -> Forecaster:
     """The production wiring: configured artifact, current features, current
-    exclusions, configured gates."""
+    exclusions, configured gates. artifact_dir overrides the configured
+    artifact (a challenger in its trial); everything else stays the same, so
+    both models see identical data and gates."""
     cfg = load_config()
-    artifact = load_artifact(cfg.output_root / cfg.name)
+    artifact = load_artifact(
+        artifact_dir if artifact_dir is not None else cfg.output_root / cfg.name
+    )
     features_path = Path(FEATURES_PATH)
     if not features_path.is_absolute():
         features_path = PROJECT_ROOT / features_path

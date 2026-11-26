@@ -46,12 +46,16 @@ jobs:
       contents: read
       packages: write
     env:
-      BUNDLE_TAG: serving-2026-10-01
-      BUNDLE_FILE: serving_bundle_2026-10-01.tar.gz
       IMAGE: ghcr.io/aashishs97/gridcast
     steps:
       - uses: actions/checkout@v5
+      - name: Which bundle is the champion (configs/serving.toml)
+        id: champion
+        run: python3 .github/scripts/bundle_ref.py | tee -a "$GITHUB_OUTPUT"
       - name: Download and unpack serving bundle
+        env:
+          BUNDLE_TAG: ${{ steps.champion.outputs.tag }}
+          BUNDLE_FILE: ${{ steps.champion.outputs.file }}
         run: |
           curl -fsSL -o bundle.tar.gz "https://github.com/${{ github.repository }}/releases/download/${BUNDLE_TAG}/${BUNDLE_FILE}"
           tar -xzf bundle.tar.gz

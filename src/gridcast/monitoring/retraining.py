@@ -348,6 +348,117 @@ def close_challenger(log_dir: Path, status: str, reason: str, now: pd.Timestamp)
     return state
 
 
+PROGRESS_FILE = "trial_progress.csv"
+PROGRESS_COLS = [
+    "run_at",
+    "tag",
+    "n_paired",
+    "rel_diff",
+    "rel_lo",
+    "rel_hi",
+    "champion_pinball",
+    "challenger_pinball",
+    "challenger_coverage",
+    "challenger_zone",
+    "champion_zone",
+    "decision",
+    "reason",
+]
+
+
+def trial_state(log_dir: Path, champion_cutoff: pd.Timestamp) -> dict:
+    """What the daily job should do about the trial. merged: serving.toml
+    already names the challenger's cutoff (its promotion PR was merged), so
+    the trial is over and only needs closing."""
+    state = read_challenger(log_dir)
+    if not state or state.get("status") != "trial":
+        return {"active": False}
+    cutoff = pd.Timestamp(state["cutoff"])
+    return {
+        "active": True,
+        "tag": state["tag"],
+        "artifact": state["artifact"],
+        "cutoff": f"{cutoff:%Y-%m-%d}",
+        "merged": bool(cutoff == champion_cutoff),
+    }
+
+
+def trial_report(
+    c: Comparison, tag: str, cutoff: pd.Timestamp, cfg: RetrainingConfig, now: pd.Timestamp
+) -> list[str]:
+    pct = "{:+.1%}".format
+    lines = [
+        f"# Trial: {tag} (challenger) vs the champion",
+        "",
+        f"Written {now:%Y-%m-%d %H:%M} UTC. Paired comparison on origins from {cutoff:%Y-%m-%d}",
+        "(the challenger's cutoff), both models scored against the same final actuals.",
+        f"Mean pinball over p10/p50/p90; decide after {cfg.min_paired} pairs, end at "
+        f"{cfg.max_paired}; non-inferiority margin {cfg.margin:+.0%}.",
+        "",
+        f"**Decision: {c.decision}** -- {c.reason}",
+        "",
+        f"- paired origins: {c.n_paired}",
+    ]
+    if c.n_paired >= cfg.min_paired:
+        lines += [
+            f"- mean pinball: champion {c.champion_pinball:.2f}, challenger "
+            f"{c.challenger_pinball:.2f} MW",
+            f"- challenger relative to champion: {pct(c.rel_diff)} "
+            f"(95% band {pct(c.rel_band[0])} to {pct(c.rel_band[1])})",
+            f"- 80% coverage: challenger {c.challenger_coverage:.1%} "
+            f"({c.challenger_coverage_zone}), champion zone {c.champion_coverage_zone}",
+        ]
+    lines += [
+        "",
+        "Promotion = merging the pull request that sets `train_cutoff` in",
+        "`configs/serving.toml`; CI then deploys this bundle. Rollback = revert that",
+        "commit: every bundle stays an immutable release.",
+    ]
+    return lines
+
+
+def record_comparison(
+    log_dir: Path, trial_dir: Path, cfg: RetrainingConfig, acc: MonitoringConfig, now: pd.Timestamp
+) -> Comparison:
+    """Compare the champion log (log_dir) with the trial log (trial_dir),
+    write TRIAL.md and append one row to trial_progress.csv."""
+    from gridcast.serving.daily_log import HOURLY_COLS
+
+    state = read_challenger(log_dir)
+    if not state or state.get("status") != "trial":
+        raise SystemExit("no trial in progress")
+    cutoff = pd.Timestamp(state["cutoff"])
+    champ = read_log(log_dir / "hourly.csv", HOURLY_COLS)
+    chall = read_log(trial_dir / "hourly.csv", HOURLY_COLS)
+    if champ.empty or chall.empty:
+        c = Comparison("wait", 0, reason="no scored pairs yet")
+    else:
+        c = compare(champ, chall, cutoff, cfg, acc)
+    report = trial_report(c, state["tag"], cutoff, cfg, now)
+    (log_dir / "TRIAL.md").write_text("\n".join(report) + "\n", encoding="utf-8")
+    row = {
+        "run_at": now.isoformat(),
+        "tag": state["tag"],
+        "n_paired": c.n_paired,
+        "rel_diff": c.rel_diff,
+        "rel_lo": c.rel_band[0],
+        "rel_hi": c.rel_band[1],
+        "champion_pinball": c.champion_pinball,
+        "challenger_pinball": c.challenger_pinball,
+        "challenger_coverage": c.challenger_coverage,
+        "challenger_zone": c.challenger_coverage_zone,
+        "champion_zone": c.champion_coverage_zone,
+        "decision": c.decision,
+        "reason": c.reason,
+    }
+    path = log_dir / PROGRESS_FILE
+    old = pd.read_csv(path) if path.exists() else pd.DataFrame(columns=PROGRESS_COLS)
+    pd.concat([old, pd.DataFrame([row], columns=PROGRESS_COLS)], ignore_index=True).to_csv(
+        path, index=False
+    )
+    return c
+
+
 def decide(log_dir: Path, force: bool, champion_cutoff: pd.Timestamp | None = None) -> Trigger:
     """The trigger on a log directory. A running trial blocks a new build;
     --force supplies a reason (manual request) but never lifts a blocker."""
@@ -394,11 +505,45 @@ def main() -> int:
     c.add_argument("--log-dir", type=Path, required=True)
     c.add_argument("--status", required=True, choices=["promoted", "rejected"])
     c.add_argument("--reason", required=True)
+    s = sub.add_parser("trial-state", help="is a trial running, and was it merged?")
+    s.add_argument("--log-dir", type=Path, required=True)
+    s.add_argument("--github-output", action="store_true")
+    k = sub.add_parser("compare", help="paired champion/challenger comparison")
+    k.add_argument("--log-dir", type=Path, required=True)
+    k.add_argument("--trial-dir", type=Path, required=True)
+    k.add_argument("--github-output", action="store_true")
     r = sub.add_parser("register", help="record a published challenger")
     r.add_argument("--log-dir", type=Path, required=True)
     r.add_argument("--cutoff", required=True)
     r.add_argument("--tag", required=True)
     args = ap.parse_args()
+
+    def emit(values: dict) -> None:
+        for key, value in values.items():
+            print(f"{key}={value}")
+        if getattr(args, "github_output", False):
+            with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+                for key, value in values.items():
+                    text = str(value).lower() if isinstance(value, bool) else str(value)
+                    f.write(f"{key}={text}\n")
+
+    if args.cmd == "trial-state":
+        emit(trial_state(args.log_dir, load_serving_config().train_cutoff))
+        return 0
+
+    if args.cmd == "compare":
+        from gridcast.monitoring.accuracy import load_config as load_accuracy_config
+
+        c = record_comparison(
+            args.log_dir,
+            args.trial_dir,
+            load_config(),
+            load_accuracy_config(),
+            pd.Timestamp.now(tz="UTC").floor("s"),
+        )
+        print((args.log_dir / "TRIAL.md").read_text(encoding="utf-8"))
+        emit({"decision": c.decision, "reason": c.reason.replace("\n", " ")})
+        return 0
 
     if args.cmd == "close":
         state = close_challenger(

@@ -372,8 +372,11 @@ def run(fc: Forecaster, log_dir: Path, now: pd.Timestamp) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--log-dir", type=Path, required=True, help="directory holding the CSV log")
+    ap.add_argument("--artifact-dir", type=Path, help="another artifact (a challenger's trial)")
     args = ap.parse_args()
-    return run(from_config(), args.log_dir, pd.Timestamp.now(tz="UTC").floor("s"))
+    args.log_dir.mkdir(parents=True, exist_ok=True)
+    fc = from_config(args.artifact_dir)
+    return run(fc, args.log_dir, pd.Timestamp.now(tz="UTC").floor("s"))
 
 
 if __name__ == "__main__":
