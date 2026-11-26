@@ -1,3 +1,4 @@
 run_at,tag,n_paired,rel_diff,rel_lo,rel_hi,champion_pinball,challenger_pinball,challenger_coverage,challenger_zone,champion_zone,decision,reason
 2026-11-26T06:18:03+00:00,serving-2026-10-27,1,,,,,,,,,wait,"1 paired origin(s), need 14"
 2026-11-26T06:40:45+00:00,serving-2026-10-27,1,,,,,,,,,wait,"1 paired origin(s), need 14"
+2026-11-26T17:48:34+00:00,serving-2026-10-27,1,,,,,,,,,wait,"1 paired origin(s), need 14"
