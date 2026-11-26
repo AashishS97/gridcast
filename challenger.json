@@ -1,10 +1,8 @@
 {
-  "tag": "serving-2026-10-24",
-  "cutoff": "2026-10-24T00:00:00+00:00",
-  "artifact": "lgbm_quantile_2026-10-24",
-  "status": "rejected",
-  "registered_at": "2026-11-23T13:02:34+00:00",
-  "code_sha": "86a76e81581a",
-  "closed_at": "2026-11-23T13:35:14+00:00",
-  "reason": "recipe deviation: trained from 2023-11-01, recipe starts 2023-07-01 (fetch window was rolling); never served"
+  "tag": "serving-2026-10-27",
+  "cutoff": "2026-10-27T00:00:00+00:00",
+  "artifact": "lgbm_quantile_2026-10-27",
+  "status": "trial",
+  "registered_at": "2026-11-26T05:45:32+00:00",
+  "code_sha": "8196b3d96bc2"
 }
