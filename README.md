@@ -5,15 +5,17 @@ intervals, backtesting, drift monitoring, automated retraining, and
 LLM-generated daily forecast reports. Built on real data from the ENTSO-E
 Transparency Platform and Open-Meteo.
 
-**Status: Phase 5 (CI/CD and deployment) complete.** The gated forecast
+**Status: Phase 6 (monitoring and retraining) complete.** The gated forecast
 API is live at **https://gridcast-7kic.onrender.com** (free tier: the first
-request after 15 idle minutes waits ~1 minute for a cold start). Every push
-is linted and tested, every pull request is backtested against a frozen
-baseline, every green commit on `main` is deployed automatically, and a
-daily job scores the frozen model on data it has never seen
-([shadow log](https://github.com/AashishS97/gridcast/tree/forecast-log)).
-Drift detection, scheduled retraining and the dashboard are next - see
-roadmap.
+request after 15 idle minutes waits ~1 minute for a cold start) and the
+monitoring dashboard at **https://gridcast-monitoring.streamlit.app**.
+Every push is linted and tested, every pull request is backtested against
+a frozen baseline, every green commit on `main` is deployed automatically,
+and a daily job scores the served model on data it has never seen, tracks
+accuracy, drift and upstream data defects, and runs a paired trial of any
+retrained challenger
+([log](https://github.com/AashishS97/gridcast/tree/forecast-log)).
+LLM commentary is next - see roadmap.
 
 ## Why this project
 
@@ -59,11 +61,12 @@ flowchart LR
     end
 ```
 
-The Ingest, Features, Model and Serve stages are built and deployed,
-including quantile regression, conformal calibration and a trust flag.
-Backtesting runs offline and, on a pinned subset of folds, as a pull-request
-gate; a daily shadow evaluation scores served forecasts once their actuals
-are final. Drift detection, the dashboard and Report are roadmap.
+The Ingest, Features, Model, Serve and Monitor stages are built and
+deployed, including quantile regression, conformal calibration and a trust
+flag. Backtesting runs offline and, on a pinned subset of folds, as a
+pull-request gate; a daily job scores served forecasts once their actuals
+are final, checks drift and data, and retrains through a champion/challenger
+trial. Report is roadmap.
 
 ## What works today
 
@@ -71,7 +74,7 @@ One command builds a model-ready feature table from an empty data folder:
 
     uv run python -m gridcast.build
 
-This fetches ~3 years of Dutch load (actual + TSO day-ahead forecast) at
+This fetches Dutch load from 2023-07-01 (actual + TSO day-ahead forecast) at
 native 15-minute resolution, caches it as monthly parquet, cleans it,
 aggregates to hourly, joins population-weighted national weather and
 calendar features, and writes `data/processed/features.parquet`
@@ -104,6 +107,15 @@ and the Phase 5 automation (normally run by GitHub Actions, runnable locally):
 
     uv run python -m gridcast.models.regression_gate --out gate.json --baseline configs/gate_baseline.json
     uv run python -m gridcast.serving.daily_log --log-dir forecast-log
+
+and the Phase 6 monitoring and retraining (normally run by GitHub Actions):
+
+    uv run python -m gridcast.monitoring.accuracy --log-dir forecast-log     # bands, zones, per hour
+    uv run python -m gridcast.monitoring.drift --log-dir forecast-log        # drift + data checks
+    uv run python -m gridcast.monitoring.retraining decide --log-dir forecast-log
+    uv run python -m gridcast.models.export_artifact --cutoff 2026-10-27    # a challenger
+    uv run python -m gridcast.models.candidate --cutoff 2026-10-27 --out dist
+    uv run --with streamlit streamlit run dashboard/app.py                  # the dashboard
 
 ## Results (Phase 2)
 
@@ -373,13 +385,130 @@ it out of the image.
 - Not a live day-ahead forecaster: the API serves a fixed data vintage and
   the daily job runs ~30 days behind (provisional data, and weather is
   observed, not forecast).
-- The served model is frozen at 2026-10-01; nothing retrains yet. The
-  shadow log is how ageing will show.
+- The served model is frozen at 2026-10-01 (retraining arrived in Phase 6).
 - The gate checks the raw quantile model on 14 folds and gates one pooled
   metric; a change that helps p50 and hurts p90 can pass.
 - Free tier: cold starts of ~1 minute after 15 idle minutes. GitHub
   disables scheduled workflows after 60 days without commits.
 - Action versions are pinned to tags, not commit SHAs.
+
+## Phase 6: monitoring and retraining
+
+Dashboard: **https://gridcast-monitoring.streamlit.app** (sleeps after 12 h
+without visitors; the first visit then waits for a restart).
+
+```mermaid
+flowchart LR
+    D[Daily job] --> L[(forecast-log)]
+    L --> A[Accuracy<br/>day-bootstrap bands, zones]
+    L --> V[Drift + data checks<br/>vintage ledger]
+    A & V -->|red| E[Run fails<br/>titled error]
+    A & V --> T{Retrain trigger}
+    T -->|schedule / red /<br/>persistent amber| R[Retrain on Actions<br/>static checks, prerelease]
+    R --> P[Paired trial<br/>one pair per day]
+    P -->|worse| X[Auto-reject]
+    P -->|non-inferior| PR[Promotion PR]
+    PR -->|human merge| CI[CI deploys bundle<br/>named in serving.toml]
+    L --> S[Streamlit dashboard]
+```
+
+The analogy throughout is how banks monitor production models (ongoing
+monitoring, documented thresholds, escalation, change management) - kept
+honest: GridCast is a forecasting system, not a capital model, and the
+person who approves a promotion is the same person who built the model.
+SR 11-7 was replaced by SR 26-2 on 2026-04-17; the ECB guide to internal
+models covers Pillar 1 models and explicitly not managerial ones.
+
+**Logging.** What can never be recovered later is logged, nothing else:
+the exact feature rows each forecast was computed from (`inputs.csv`; the
+feature table is rebuilt from a revising upstream daily), a 60-day ledger
+of what ENTSO-E published at every run (`vintages.csv`, the only record of
+*when* a revision arrived), per-hour scores with raw quantiles and a
+seasonal-naive value (`hourly.csv`), and the code commit per run. The API
+writes one JSON line per request to stdout (no client IPs, no `/health`);
+Render keeps it 7 days, so it is an operational record only.
+
+**Accuracy.** Trailing 28 origins (four whole weeks). Bands resample whole
+days, not hours: a forecast's 24 hours fail together, and a binomial over
+hours gave a band half as wide (79-86% vs 76-89% on the first 21 days).
+Zones after the Basel traffic-light test: green while the target is inside
+the 95% band, amber outside it, red outside the 99.9% band (Basel uses
+99.99%; 28 days cannot resolve it). Skill is measured against the seasonal
+naive on the same hours; raw quantiles are compared with the calibration
+pool and backtest, which are raw too.
+
+**Drift.** KS or PSI against the training data fire every season. Instead,
+each hour becomes an anomaly from the training years' average for that hour
+and time of year (leave-one-year-out for reference years), and the recent
+28-day mean anomaly is set against same-season reference windows. Feature
+and target drift are amber at most - unusual inputs are a reason to look,
+not evidence of worse forecasts; concept drift is read from the residuals
+(tail rates, raw median error). A support check counts hours outside the
+seasonal training range, where trees cannot extrapolate.
+
+**Data checks.** The vintage ledger catches a revision of a day the gates
+already treated as final (`late_revision`, red), final days that still look
+provisional (`final_level`, red), gaps, and weather lag. The first live
+observation: a day revised at age 28 - the 29-day gate has a one-day margin.
+
+**Retraining.** Triggers: 28 days of final data unseen by the champion, a
+red accuracy or concept zone, or an amber one held for 7 days; feature
+drift never triggers alone; a red data check or a running trial blocks.
+The hard problem: a challenger trained to today's provisional line has no
+final out-of-sample day, and every older day is in its training data or a
+spent holdout. So both models forecast every new origin and each pair is
+scored once final - about one pair a day, since the system already runs
+~30 days behind. Paired differences cancel day-to-day difficulty. After 14
+pairs: reject if the band on the relative pinball difference lies above 0
+(or the challenger alone turns coverage red), promote if it ends below +2%
+(non-inferiority, the backtest gate's margin), and at 28 a tie goes to the
+fresher model. A challenger must first pass static checks: file integrity,
+parity between serving and export, quantile params, increasing conformal
+shifts, pool sanity bounds, and the recipe's training start. Promotion is a
+pull request that changes one line, `train_cutoff` in `configs/serving.toml`
+- the only place the champion is named; merging it deploys the bundle;
+rollback is reverting that commit (bundles are immutable releases).
+
+**Findings from this phase.**
+
+- The raw model under-forecasts, increasingly through autumn: the median
+  error the conformal shift absorbs grew +110 -> +162 -> +172 MW as the
+  calibration pool moved from Aug-Sep to late October, also in fresh
+  one-origin-ahead retrains. Retraining recalibrates it; it does not remove
+  it. A recipe question.
+- Early stopping is unreliable: q90 stops after ~100-150 trees in every
+  export, q10 and q50 now hit the 2000-tree ceiling.
+- Intervals are calibrated in total, not per hour: daylight hours (solar)
+  ~74% coverage, night and evening ~87-93%. Per-hour-group conformal shifts
+  are the candidate fix.
+- Three pipeline defects were caught by the new checks before they
+  mattered: ENTSO-E's non-standard HTTP 599 was not retried; the fetch
+  window was "3 years before today", so a challenger built on CI trained
+  from 2023-11 while the champion trained from 2023-07 (rejected, recorded
+  in `trials.csv`); and caching raw months would have hidden revisions of
+  days 31-61 old from the late-revision check.
+- Scheduled runs start 8-12 hours after their 07:17 UTC cron. Harmless for
+  a system that runs 30 days behind; only visible because start times are
+  logged.
+- The ENTSO-E cache cut the daily job from ~25 minutes to ~1-2.
+
+**Free-tier budget.** Actions minutes are free on public repositories;
+one Render service can use at most 744 h of its 750 free hours a month even
+if it never sleeps; a cached daily run should make about 6 ENTSO-E requests
+(three refetched months x two series; logged per run in `runs.csv` from
+2026-11-26) against 400 allowed per minute; Streamlit Community Cloud gives ~1 GB per app.
+
+**What this is not.**
+
+- The approval step is a person merging a pull request; there is no
+  independent validator.
+- The trial decides on mean pinball loss and coverage; a challenger worse
+  in one hour group can still pass.
+- The red escalation path is tested, not yet exercised live; the access
+  log on Render was never checked after deploy.
+- Scheduled workflows may still be disabled after 60 days without activity
+  on the default branch; daily commits go to `forecast-log`, which may not
+  count. The run-health panel would show it; nothing prevents it.
 
 ## Pipeline design
 
@@ -517,10 +646,10 @@ is for.
 - The static lower load bound cannot catch a night-time sag to a few
   hundred MW; spike and flatline checks are the backstop.
 - ENTSO-E NL actual load is provisional for ~28 days after publication
-  (see second finding). The daily job rebuilds from a fresh pull, but the
-  local fetch cache treats months older than 30 days as immutable, so a
-  local re-verification is still a deliberate refetch. Nothing checks
-  automatically that revisions keep arriving on schedule.
+  (see second finding). Months that ended more than 62 days ago are cached
+  as immutable (locally and, since Phase 6, on CI, refreshed in full once a
+  month); a revision older than that is only picked up by the monthly
+  refresh. The vintage ledger checks that revisions arrive on schedule.
 - Open-Meteo's archive API lags ~5 days behind real time, leaving
   recent hours without weather; production needs a fallback to the
   forecast endpoint. The weather cache also never refreshes on its own.
@@ -546,23 +675,27 @@ is for.
     |   |-- serving/     # Artifact loading + integrity checks, gated forecaster,
     |   |                # daily shadow log
     |   |-- api/         # FastAPI app: /health, /model, /origins, /forecast
-    |   |-- monitoring/  # (Phase 5) Drift detection, quality tracking
+    |   |-- monitoring/  # Accuracy bands and zones, drift and data checks,
+    |   |                # retraining policy and trials, run health
     |   |-- build.py     # One-command raw -> clean -> features pipeline
     |-- data/            # Raw & processed data (gitignored, reproducible)
     |-- models/          # Frozen serving artifacts (gitignored; hashed manifest)
     |-- notebooks/       # Exploration & diagnosis only - logic lives in src/
     |-- reports/         # Evaluation reports (phase2/, phase3/)
-    |-- tests/           # 148 tests, no network required
+    |-- dashboard/       # Streamlit monitoring dashboard (reads forecast-log)
+    |-- tests/           # 237 tests, no network required
     |-- configs/         # Data exclusions, evaluation windows, serving cutoff + gates
     |-- Dockerfile       # Serving image (multi-stage, non-root, healthcheck)
     |-- .github/workflows/
     |   |-- ci.yml             # lint + test on push; image build, smoke test, deploy on main
     |   |-- backtest-gate.yml  # regression gate on pull requests
-    |   |-- daily.yml          # daily shadow forecast + scoring
+    |   |-- daily.yml          # shadow forecast, scoring, monitoring, challenger trial
+    |   |-- retrain.yml        # build a challenger: decide, export, check, prerelease
+    |   |-- scripts/bundle_ref.py  # which bundle is the champion (configs/serving.toml)
 
 ## Testing
 
-`uv run pytest` - 148 tests, no network required. Highlights: DST
+`uv run pytest` - 237 tests, no network required. Highlights: DST
 boundary behaviour on both switch days; rolling-origin folds proven
 non-overlapping and midnight-aligned; Fourier regressors tested for
 actual periodicity (which caught a timestamp-resolution bug that gave
@@ -587,6 +720,18 @@ refused, not passed; the daily log scores a forecast only once its whole
 target day is final and outside every exclusion, appends each origin
 exactly once across re-runs, picks up newly final days on a later vintage,
 and fails (while still logging) on stale data; `/` redirects to the docs.
+Phase 6 adds: logged inputs reproduce the forecast bit for bit; the
+day-resampled band is wider than an hourly binomial on correlated days;
+every zone at its boundaries; anomalies are leave-one-year-out (years at
+0/3/6 give -4.5/0/+4.5, not -3/0/+3); each data check fires on exactly its
+defect (a revision on schedule is not late, a final day that moves is);
+manual re-runs do not count as extra amber days; a paired trial never
+counts pre-cutoff origins and promotes, rejects or waits as specified;
+a candidate with tampered files, other data, wrong params, non-increasing
+shifts or another training start fails exactly that check; the export
+refuses a cutoff after the provisional line; the data start equals the
+recipe's `train_start` and the cache horizon covers the vintage ledger;
+ENTSO-E 599 is retried and retries are bounded.
 
 ## Setup
 
@@ -618,8 +763,9 @@ and fails (while still logging) on stale data; `/` redirects to the docs.
 5. ~~CI/CD and deployment: lint and test on every push, backtest gate on
    pull requests, automatic deploy to Render, daily shadow evaluation~~
    (done)
-6. Monitoring & retraining: drift detection, scheduled retraining,
-   Streamlit dashboard
+6. ~~Monitoring & retraining: logging, accuracy with honest bands, drift
+   and data checks, champion/challenger retraining, Streamlit dashboard~~
+   (done)
 7. LLM-generated daily forecast commentary
 
 ## Tech stack
