@@ -175,7 +175,7 @@ run_at,family,check,subject,value,lo,hi,zone,note
 2026-11-26T06:40:41Z,feature,support,temperature_2m,0.0089285714285714,,,green,2026-10-23 to 2026-11-19; 6 of 672 hours outside the seasonal training range
 2026-11-26T06:40:41Z,feature,shift,shortwave_radiation,3.4728870647721446,-14.545616866533797,3.43221887453612,amber,2026-10-23 to 2026-11-19; percentile 95% of 273 same-season reference windows (~10 independent)
 2026-11-26T06:40:41Z,feature,support,shortwave_radiation,0.0,,,green,2026-10-23 to 2026-11-19; 0 of 672 hours outside the seasonal training range
-2026-11-26T06:40:41Z,feature,shift,wind_speed_10m,-2.1322802259344598,-4.768318196364568,6.193304320809864,green,2026-10-23 to 2026-11-19; percentile 27% of 273 same-season reference windows (~10 independent)
+2026-11-26T06:40:41Z,feature,shift,wind_speed_10m,-2.13228022593446,-4.768318196364568,6.193304320809864,green,2026-10-23 to 2026-11-19; percentile 27% of 273 same-season reference windows (~10 independent)
 2026-11-26T06:40:41Z,feature,support,wind_speed_10m,0.0669642857142857,,,amber,2026-10-23 to 2026-11-19; 45 of 672 hours outside the seasonal training range
 2026-11-26T06:40:41Z,concept,tail_rate,below p10,0.0694444444444444,0.0324074074074074,0.1203703703703703,green,nominal 10%; 27 origins
 2026-11-26T06:40:41Z,concept,tail_rate,above p90,0.1342592592592592,0.0802469135802469,0.191358024691358,green,nominal 10%; 27 origins
@@ -188,18 +188,35 @@ run_at,family,check,subject,value,lo,hi,zone,note
 2026-11-26T06:40:41Z,data,weather_lag,temperature,6.0,,,green,newest day with temperature is 6 days old
 2026-11-26T17:48:28Z,target,shift,load_mw,718.5824680193764,-550.0195524390931,695.3887522953469,amber,2026-09-30 to 2026-10-27; percentile 96% of 289 same-season reference windows (~10 independent)
 2026-11-26T17:48:28Z,target,support,load_mw,0.1130952380952381,,,amber,2026-09-30 to 2026-10-27; 76 of 672 hours outside the seasonal training range
-2026-11-26T17:48:28Z,feature,shift,temperature_2m,-1.6173516705069122,-2.277456508203497,1.7866490977147327,green,2026-10-23 to 2026-11-19; percentile 17% of 273 same-season reference windows (~10 independent)
-2026-11-26T17:48:28Z,feature,support,temperature_2m,0.008928571428571428,,,green,2026-10-23 to 2026-11-19; 6 of 672 hours outside the seasonal training range
-2026-11-26T17:48:28Z,feature,shift,shortwave_radiation,3.4728870647721446,-14.545616866533795,3.4322188745361197,amber,2026-10-23 to 2026-11-19; percentile 95% of 273 same-season reference windows (~10 independent)
+2026-11-26T17:48:28Z,feature,shift,temperature_2m,-1.6173516705069122,-2.277456508203497,1.786649097714733,green,2026-10-23 to 2026-11-19; percentile 17% of 273 same-season reference windows (~10 independent)
+2026-11-26T17:48:28Z,feature,support,temperature_2m,0.0089285714285714,,,green,2026-10-23 to 2026-11-19; 6 of 672 hours outside the seasonal training range
+2026-11-26T17:48:28Z,feature,shift,shortwave_radiation,3.4728870647721446,-14.545616866533797,3.43221887453612,amber,2026-10-23 to 2026-11-19; percentile 95% of 273 same-season reference windows (~10 independent)
 2026-11-26T17:48:28Z,feature,support,shortwave_radiation,0.0,,,green,2026-10-23 to 2026-11-19; 0 of 672 hours outside the seasonal training range
-2026-11-26T17:48:28Z,feature,shift,wind_speed_10m,-2.1322802259344593,-4.768318196364568,6.1933043208098635,green,2026-10-23 to 2026-11-19; percentile 27% of 273 same-season reference windows (~10 independent)
-2026-11-26T17:48:28Z,feature,support,wind_speed_10m,0.06696428571428571,,,amber,2026-10-23 to 2026-11-19; 45 of 672 hours outside the seasonal training range
-2026-11-26T17:48:28Z,concept,tail_rate,below p10,0.06944444444444443,0.032407407407407406,0.12037037037037036,green,nominal 10%; 27 origins
-2026-11-26T17:48:28Z,concept,tail_rate,above p90,0.13425925925925927,0.08024691358024691,0.19135802469135804,green,nominal 10%; 27 origins
-2026-11-26T17:48:28Z,concept,median_error,raw p50,178.94999999999982,125.09999999999945,238.04999999999927,amber,y - raw p50; the calibration pool's median (the p50 shift) is +109.9 MW
+2026-11-26T17:48:28Z,feature,shift,wind_speed_10m,-2.1322802259344598,-4.768318196364568,6.193304320809864,green,2026-10-23 to 2026-11-19; percentile 27% of 273 same-season reference windows (~10 independent)
+2026-11-26T17:48:28Z,feature,support,wind_speed_10m,0.0669642857142857,,,amber,2026-10-23 to 2026-11-19; 45 of 672 hours outside the seasonal training range
+2026-11-26T17:48:28Z,concept,tail_rate,below p10,0.0694444444444444,0.0324074074074074,0.1203703703703703,green,nominal 10%; 27 origins
+2026-11-26T17:48:28Z,concept,tail_rate,above p90,0.1342592592592592,0.0802469135802469,0.191358024691358,green,nominal 10%; 27 origins
+2026-11-26T17:48:28Z,concept,median_error,raw p50,178.94999999999982,125.09999999999944,238.04999999999927,amber,y - raw p50; the calibration pool's median (the p50 shift) is +109.9 MW
 2026-11-26T17:48:28Z,data,revisions_seen,load,13.0,27.0,28.0,info,"13 day(s) revised by > 5% in the ledger; ages at revision 27-28 days, median change +13.8%"
 2026-11-26T17:48:28Z,data,late_revision,load,0.0,,,green,no day older than 29 days changed in the latest run
 2026-11-26T17:48:28Z,data,final_level,load,1.0433051032483711,,,green,mean of final days aged 30-43 / aged > 43; red below 0.85
 2026-11-26T17:48:28Z,data,provisional,load,0.8445694117047783,,,info,days aged 1-29 / final days aged 30-43: well below 1 means under-publication is active
 2026-11-26T17:48:28Z,data,final_gaps,load,0.0,,,green,every final day has 24 hours
 2026-11-26T17:48:28Z,data,weather_lag,temperature,6.0,,,green,newest day with temperature is 6 days old
+2026-11-27T17:32:03Z,target,shift,load_mw,704.2199172121248,-550.0195524390931,698.411832579685,amber,2026-10-01 to 2026-10-28; percentile 95% of 289 same-season reference windows (~10 independent)
+2026-11-27T17:32:03Z,target,support,load_mw,0.11607142857142858,,,amber,2026-10-01 to 2026-10-28; 78 of 672 hours outside the seasonal training range
+2026-11-27T17:32:03Z,feature,shift,temperature_2m,-1.6581282802099333,-2.2585017762816064,1.7866490977147327,green,2026-10-24 to 2026-11-20; percentile 15% of 273 same-season reference windows (~10 independent)
+2026-11-27T17:32:03Z,feature,support,temperature_2m,0.008928571428571428,,,green,2026-10-24 to 2026-11-20; 6 of 672 hours outside the seasonal training range
+2026-11-27T17:32:03Z,feature,shift,shortwave_radiation,3.9527593766001017,-14.545616866533795,3.473092321866816,amber,2026-10-24 to 2026-11-20; percentile 97% of 273 same-season reference windows (~10 independent)
+2026-11-27T17:32:03Z,feature,support,shortwave_radiation,0.0,,,green,2026-10-24 to 2026-11-20; 0 of 672 hours outside the seasonal training range
+2026-11-27T17:32:03Z,feature,shift,wind_speed_10m,-2.6124630376344085,-4.768318196364568,6.269792034690219,green,2026-10-24 to 2026-11-20; percentile 18% of 273 same-season reference windows (~10 independent)
+2026-11-27T17:32:03Z,feature,support,wind_speed_10m,0.06696428571428571,,,amber,2026-10-24 to 2026-11-20; 45 of 672 hours outside the seasonal training range
+2026-11-27T17:32:03Z,concept,tail_rate,below p10,0.06845238095238095,0.03273809523809523,0.11755952380952384,green,nominal 10%; 28 origins
+2026-11-27T17:32:03Z,concept,tail_rate,above p90,0.12946428571428573,0.07738095238095237,0.18749999999999997,green,nominal 10%; 28 origins
+2026-11-27T17:32:03Z,concept,median_error,raw p50,175.79999999999927,124.94999999999982,228.20000000000073,amber,y - raw p50; the calibration pool's median (the p50 shift) is +109.9 MW
+2026-11-27T17:32:03Z,data,revisions_seen,load,14.0,27.0,28.0,info,"14 day(s) revised by > 5% in the ledger; ages at revision 27-28 days, median change +15.2%"
+2026-11-27T17:32:03Z,data,late_revision,load,0.0,,,green,no day older than 29 days changed in the latest run
+2026-11-27T17:32:03Z,data,final_level,load,1.045616663787301,,,green,mean of final days aged 30-43 / aged > 43; red below 0.85
+2026-11-27T17:32:03Z,data,provisional,load,0.8449293943175635,,,info,days aged 1-29 / final days aged 30-43: well below 1 means under-publication is active
+2026-11-27T17:32:03Z,data,final_gaps,load,0.0,,,green,every final day has 24 hours
+2026-11-27T17:32:03Z,data,weather_lag,temperature,6.0,,,green,newest day with temperature is 6 days old
