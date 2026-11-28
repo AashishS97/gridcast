@@ -6,4 +6,5 @@ day,scheduled_daily,schedule_delay_min,daily_runs,daily_ok,retrain_runs,ci_runs,
 2026-11-24T00:00:00Z,True,699.6,1,True,1,0,1.3
 2026-11-25T00:00:00Z,True,643.3,1,True,1,0,2.1
 2026-11-26T00:00:00Z,True,629.2,3,True,4,6,33.6
-2026-11-27T00:00:00Z,True,613.8,1,False,0,0,0.0
+2026-11-27T00:00:00Z,True,613.8,1,True,1,0,1.8
+2026-11-28T00:00:00Z,True,538.1,1,False,0,0,0.0
